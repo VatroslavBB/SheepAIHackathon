@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useLang } from '../LangContext'
 import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMapEvents } from 'react-leaflet'
 import MarkerClusterGroup from 'react-leaflet-cluster'
 import L from 'leaflet'
@@ -80,19 +81,25 @@ function makePinIcon(label) {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
+function YourLocationLabel() {
+  const { t } = useLang()
+  return t.map.yourLocation
+}
+
 function ClickHandler({ onMapClick }) {
   useMapEvents({ click: (e) => onMapClick(e.latlng) })
   return null
 }
 
 function BusMarker({ vehicle: v }) {
+  const { t } = useLang()
   const icon = useMemo(() => makeBusIcon(v), [v.status, v.heading, v.line])
   return (
     <Marker position={[v.lat, v.lng]} icon={icon}>
       <Popup>
         <div className="popup-line">Linija {v.line}</div>
         <div className="popup-detail">
-          <span className={`popup-badge badge-s${v.status}`}>{STATUS_LABEL[v.status] || '?'}</span>
+          <span className={`popup-badge badge-s${v.status}`}>{t.map.status[v.status] || '?'}</span>
           {v.status === 1 && v.compass && (
             <><br />Smjer: <b>{v.compass}</b>{v.heading != null ? ` (${Math.round(v.heading)}°)` : ''}</>
           )}
@@ -103,26 +110,28 @@ function BusMarker({ vehicle: v }) {
 }
 
 function IncidentMarker({ report: r, onUpvote }) {
-  const meta = INCIDENT_META[r.type] || INCIDENT_META.jam
+  const { t } = useLang()
   const icon = useMemo(() => makeIncidentIcon(r.type, r.auto), [r.type, r.auto])
+  const label = r.auto ? t.map.works : (t.map.incident[r.type] || r.type)
+  const emoji = r.auto ? '🔧' : (INCIDENT_META[r.type]?.emoji ?? '⚠️')
   return (
     <Marker position={[r.lat, r.lng]} icon={icon} opacity={r.severity === 'low' ? 0.65 : 1}>
       <Popup>
         <div className="popup-line">
-          {r.auto ? '🔧 Radovi' : `${meta.emoji} ${meta.label}`}
+          {emoji} {label}
           {r.auto && <span style={{ marginLeft: 6, fontSize: 10, background: '#92400e', color: '#fde68a', borderRadius: 3, padding: '1px 4px' }}>OSM</span>}
         </div>
         <div className="popup-detail">
           {r.location && <>{r.location}<br /></>}
           {r.summary  && <span style={{ color: '#e2e8f0', display: 'block', marginBottom: 4 }}>{r.summary}</span>}
-          Ozbiljnost: {SEV_LABEL[r.severity] || r.severity}
-          {!r.auto && <> · {r.votes} potvrda</>}
+          {t.map.severity}: {t.map.sev[r.severity] || r.severity}
+          {!r.auto && <> · {r.votes} {t.map.confirmations}</>}
           {!r.auto && (
             <><br />
             <button
               onClick={() => onUpvote(r.id)}
               style={{ marginTop: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}
-            >+ Potvrdi</button></>
+            >{t.map.confirm}</button></>
           )}
         </div>
       </Popup>
@@ -131,18 +140,17 @@ function IncidentMarker({ report: r, onUpvote }) {
 }
 
 function BikeMarker({ station: s }) {
+  const { t } = useLang()
   const icon = useMemo(() => makeBikeIcon(s), [s.bikes, s.ebikes])
   return (
     <Marker position={[s.lat, s.lng]} icon={icon}>
       <Popup>
         <div className="popup-line">🚲 {s.name}</div>
         <div className="popup-detail">
-          Dostupno: <b>{s.bikes}</b> bicikala
-          {s.ebikes > 0 && <> ({s.ebikes} ⚡ e-bicikla)</>}
-          <br />Slobodnih mjesta: {s.free_racks}
-          <br /><span style={{ color: '#60a5fa', fontSize: 11 }}>
-            1 EUR / 30 min · 5 EUR / dan
-          </span>
+          {t.map.available}: <b>{s.bikes}</b> {t.map.bikes}
+          {s.ebikes > 0 && <> ({s.ebikes} ⚡ {t.map.ebikes})</>}
+          <br />{t.map.freeRacks}: {s.free_racks}
+          <br /><span style={{ color: '#60a5fa', fontSize: 11 }}>{t.map.bikePrice}</span>
         </div>
       </Popup>
     </Marker>
@@ -184,7 +192,7 @@ export default function MapView({ vehicles, reports, bikes, userLocation, pins, 
 
       {userLocation && (
         <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocIcon}>
-          <Popup><div className="popup-line">📍 Vaša lokacija</div></Popup>
+          <Popup><div className="popup-line">📍 <YourLocationLabel /></div></Popup>
         </Marker>
       )}
 

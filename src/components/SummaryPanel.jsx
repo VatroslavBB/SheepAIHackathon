@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { summarizeTraffic } from '../llm'
+import { useLang } from '../LangContext'
 
 export default function SummaryPanel({ reports, vehicles }) {
+  const { t } = useLang()
   const [summary, setSummary] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -26,10 +28,10 @@ export default function SummaryPanel({ reports, vehicles }) {
       backdropFilter: 'blur(6px)',
     }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 4, fontFamily: 'DM Mono, monospace', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-        Prometna situacija · {reports.length} {reports.length === 1 ? 'incident' : 'incidenta'}
+        {t.summary.label} · {t.summary.incident(reports.length)}
       </div>
       {loading
-        ? <div style={{ fontSize: 13, color: '#64748b' }}>Analiziram...</div>
+        ? <div style={{ fontSize: 13, color: '#64748b' }}>{t.summary.analyzing}</div>
         : <div style={{ fontSize: 13, color: '#e2e8f0', lineHeight: 1.5 }}>{summary}</div>
       }
     </div>
