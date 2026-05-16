@@ -1,91 +1,140 @@
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet'
+import { useMemo } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-// Fix default icon paths broken by Vite bundling
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-const ICON_MAP = {
-  jam:      { emoji: '🚗', color: '#f59e0b' },
-  accident: { emoji: '🚨', color: '#ef4444' },
-  closed:   { emoji: '🚧', color: '#6b7280' },
+const STATUS_LABEL  = { 1: 'U vožnji', 3: 'Na stajalištu', 6: 'Izvan usluge' }
+const INCIDENT_META = {
+  jam:      { emoji: '🚗', color: '#f59e0b', label: 'Gužva' },
+  accident: { emoji: '🚨', color: '#ef4444', label: 'Nesreća' },
+  closed:   { emoji: '🚧', color: '#6b7280', label: 'Zatvoreno' },
 }
+const SEV_LABEL = { low: 'Mala', medium: 'Srednja', high: 'Visoka' }
 
-const SEVERITY_OPACITY = { low: 0.6, medium: 0.85, high: 1.0 }
+// ── Icon factories ─────────────────────────────────────────────────────────────
 
-function makeIcon(type) {
-  const { emoji, color } = ICON_MAP[type] || ICON_MAP.jam
+function makeBusIcon(v) {
+  const cls    = v.status === 1 ? 's1' : v.status === 3 ? 's3' : 's6'
+  const moving = v.status === 1 && v.heading != null
+  const arrow  = moving
+    ? `<div class="bus-arrow-ring" style="transform:rotate(${v.heading}deg)"><div class="bus-arrow-tip"></div></div>`
+    : ''
   return L.divIcon({
     className: '',
-    html: `<div style="
-      background:${color};
-      border-radius:50%;
-      width:36px;height:36px;
-      display:flex;align-items:center;justify-content:center;
-      font-size:18px;
-      box-shadow:0 2px 6px rgba(0,0,0,0.4);
-      border:2px solid white;
-    ">${emoji}</div>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
+    html: `<div class="bus-wrap">${arrow}<div class="bus-num ${cls}">${v.line}</div></div>`,
+    iconSize: [40, 40], iconAnchor: [20, 20],
   })
 }
+
+function makeIncidentIcon(type) {
+  const { emoji, color } = INCIDENT_META[type] || INCIDENT_META.jam
+  return L.divIcon({
+    className: '',
+    html: `<div class="incident-marker" style="background:${color}">${emoji}</div>`,
+    iconSize: [36, 36], iconAnchor: [18, 18],
+  })
+}
+
+const userLocIcon = L.divIcon({
+  className: '',
+  html: '<div class="user-loc-dot"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9],
+})
+
+function makePinIcon(label) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="pin-wrap"><div class="pin-label">${label}</div><div class="pin-dot"></div></div>`,
+    iconSize: [1, 36], iconAnchor: [0, 36],
+  })
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function ClickHandler({ onMapClick }) {
   useMapEvents({ click: (e) => onMapClick(e.latlng) })
   return null
 }
 
-const TYPE_LABELS = { jam: 'Gužva', accident: 'Nesreća', closed: 'Zatvoreno' }
-const SEVERITY_LABELS = { low: 'Mala', medium: 'Srednja', high: 'Visoka' }
+function BusMarker({ vehicle: v }) {
+  const icon = useMemo(() => makeBusIcon(v), [v.status, v.heading, v.line])
+  return (
+    <Marker position={[v.lat, v.lng]} icon={icon}>
+      <Popup>
+        <div className="popup-line">Linija {v.line}</div>
+        <div className="popup-detail">
+          <span className={`popup-badge badge-s${v.status}`}>{STATUS_LABEL[v.status] || '?'}</span>
+          {v.status === 1 && v.compass && (
+            <><br />Smjer: <b>{v.compass}</b>{v.heading != null ? ` (${Math.round(v.heading)}°)` : ''}</>
+          )}
+        </div>
+      </Popup>
+    </Marker>
+  )
+}
 
-export default function MapView({ reports, onMapClick, onUpvote }) {
+function IncidentMarker({ report: r, onUpvote }) {
+  const meta = INCIDENT_META[r.type] || INCIDENT_META.jam
+  const icon = useMemo(() => makeIncidentIcon(r.type), [r.type])
+  return (
+    <Marker position={[r.lat, r.lng]} icon={icon} opacity={r.severity === 'low' ? 0.65 : 1}>
+      <Popup>
+        <div className="popup-line">{meta.emoji} {meta.label}</div>
+        <div className="popup-detail">
+          {r.location && <>{r.location}<br /></>}
+          {r.summary  && <span style={{ color: '#e2e8f0', display: 'block', marginBottom: 4 }}>{r.summary}</span>}
+          Ozbiljnost: {SEV_LABEL[r.severity] || r.severity} · {r.votes} potvrda
+          <br />
+          <button
+            onClick={() => onUpvote(r.id)}
+            style={{ marginTop: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}
+          >+ Potvrdi</button>
+        </div>
+      </Popup>
+    </Marker>
+  )
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+
+export default function MapView({ vehicles, reports, userLocation, pins, onMapClick, onUpvote }) {
   return (
     <MapContainer
-      center={[43.5081, 16.4402]}
+      center={[43.508, 16.440]}
       zoom={13}
+      zoomControl={false}
       style={{ height: '100%', width: '100%' }}
     >
+      <ZoomControl position="bottomright" />
+
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+        attribution="Tiles © Esri"
+        maxZoom={19}
       />
+
       <ClickHandler onMapClick={onMapClick} />
-      {reports.map(report => (
-        <Marker
-          key={report.id}
-          position={[report.lat, report.lng]}
-          icon={makeIcon(report.type)}
-          opacity={SEVERITY_OPACITY[report.severity] || 0.85}
-        >
-          <Popup>
-            <div style={{ minWidth: 180 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
-                {ICON_MAP[report.type]?.emoji} {TYPE_LABELS[report.type] || report.type}
-              </div>
-              <div style={{ color: '#555', marginBottom: 4 }}>{report.location}</div>
-              {report.summary && (
-                <div style={{ fontSize: 13, marginBottom: 6, color: '#333' }}>{report.summary}</div>
-              )}
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>
-                Ozbiljnost: {SEVERITY_LABELS[report.severity] || report.severity} &nbsp;·&nbsp; {report.votes} potvrda
-              </div>
-              <button
-                onClick={() => onUpvote(report.id)}
-                style={{
-                  background: '#2563eb', color: 'white', border: 'none',
-                  borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 13,
-                }}
-              >
-                + Potvrdi
-              </button>
-            </div>
-          </Popup>
+
+      {vehicles.map(v => <BusMarker key={v.id} vehicle={v} />)}
+
+      {reports.map(r => <IncidentMarker key={r.id} report={r} onUpvote={onUpvote} />)}
+
+      {userLocation && (
+        <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocIcon}>
+          <Popup><div className="popup-line">📍 Vaša lokacija</div></Popup>
+        </Marker>
+      )}
+
+      {pins.map((p, i) => (
+        <Marker key={i} position={[p.lat, p.lng]} icon={makePinIcon(p.label)}>
+          <Popup><div className="popup-line">📌 {p.label}</div></Popup>
         </Marker>
       ))}
     </MapContainer>

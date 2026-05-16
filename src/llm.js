@@ -9,46 +9,48 @@ const client = new OpenAI({
 const MODEL = 'meta/llama-3.3-70b-instruct'
 
 export async function parseIncidentFromText(text) {
-  const response = await client.chat.completions.create({
+  const res = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 256,
     messages: [
       {
         role: 'system',
-        content: `You are a traffic incident parser for Split, Croatia.
-Extract incident info from user reports (in Croatian or English).
-Reply with ONLY valid JSON, no markdown, no explanation.
-Schema: { "type": "jam|accident|closed", "location": "street or area name", "severity": "low|medium|high", "summary": "one sentence in Croatian" }
-If location is unclear, use "Nepoznata lokacija".`,
+        content: `Ti si parser prometnih incidenata za Split, Hrvatska.
+Izvuci informacije iz korisničke prijave (na hrvatskom ili engleskom).
+Odgovori SAMO validnim JSON-om, bez markdowna, bez objašnjenja.
+Schema: { "type": "jam|accident|closed", "location": "naziv ulice ili kvarta", "severity": "low|medium|high", "summary": "jedna rečenica na hrvatskom" }
+Ako lokacija nije jasna, koristi "Nepoznata lokacija".`,
       },
       { role: 'user', content: text },
     ],
   })
-
-  return JSON.parse(response.choices[0].message.content)
+  return JSON.parse(res.choices[0].message.content)
 }
 
-export async function summarizeCluster(reports) {
-  if (!reports.length) return null
-
-  const list = reports
-    .map(r => `- ${r.type} at ${r.location} (${r.severity} severity)`)
+export async function summarizeTraffic(reports, vehicles = []) {
+  const incidents = reports
+    .map(r => `- ${r.type} kod ${r.location} (${r.severity})`)
     .join('\n')
 
-  const response = await client.chat.completions.create({
+  const activeLines = [...new Set(
+    vehicles.filter(v => v.status === 1).map(v => v.line)
+  )].sort().join(', ')
+
+  const parts = []
+  if (incidents)   parts.push(`Incidenti:\n${incidents}`)
+  if (activeLines) parts.push(`Aktivne autobusne linije: ${activeLines}`)
+  if (!parts.length) return null
+
+  const res = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 150,
     messages: [
       {
         role: 'system',
-        content: 'You summarize traffic conditions in Split, Croatia. Write 1-2 sentences in Croatian. Be direct and useful — mention location, severity, and estimated impact. No filler.',
+        content: 'Sažmi prometnu situaciju u Splitu u 1-2 rečenice na hrvatskom. Budi konkretan — navedi lokacije problema i koje linije voze. Bez uvoda i filler rečenica.',
       },
-      {
-        role: 'user',
-        content: `Current reports:\n${list}\n\nWrite a traffic summary.`,
-      },
+      { role: 'user', content: parts.join('\n\n') },
     ],
   })
-
-  return response.choices[0].message.content
+  return res.choices[0].message.content
 }
