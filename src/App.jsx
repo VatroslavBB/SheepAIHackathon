@@ -6,11 +6,13 @@ import SummaryPanel  from './components/SummaryPanel'
 import PinLabelModal from './components/PinLabelModal'
 import { useVehicles } from './useVehicles'
 import { useReports }  from './useReports'
+import { useBikes }    from './useBikes'
 import { useRoadData } from './useRoadData'
 
 export default function App() {
   const { vehicles, online } = useVehicles()
   const { reports, addReport, upvoteReport } = useReports()
+  const { stations: bikes } = useBikes()
   const autoReports = useRoadData()
   const allReports = useMemo(() => [...reports, ...autoReports], [reports, autoReports])
 
@@ -21,6 +23,7 @@ export default function App() {
   const [pendingReport, setPendingReport] = useState(null)
   const [modalLoading,  setModalLoading]  = useState(false)
 
+  // Map click: pin mode → pin, else → incident report
   const handleMapClick = useCallback((latlng) => {
     if (pinMode) {
       setPendingPin(latlng)
@@ -88,6 +91,8 @@ export default function App() {
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
           <MapView
             vehicles={vehicles}
+            reports={reports}
+            bikes={bikes}
             reports={allReports}
             userLocation={userLocation}
             pins={pins}
@@ -123,6 +128,10 @@ export default function App() {
             </div>
           )}
 
+          {/* AI traffic summary */}
+          <SummaryPanel reports={reports} vehicles={vehicles} />
+
+          {/* Intro hint */}
           <SummaryPanel reports={allReports} vehicles={vehicles} />
 
           {!reports.length && !pinMode && (
