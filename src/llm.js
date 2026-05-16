@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 
 const client = new OpenAI({
   apiKey: import.meta.env.VITE_NVIDIA_API_KEY,
-  baseURL: 'https://integrate.api.nvidia.com/v1',
+  baseURL: '/nvidia-api/v1',
   dangerouslyAllowBrowser: true,
 })
 
@@ -44,6 +44,7 @@ export async function summarizeTraffic(reports, vehicles = []) {
   const res = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 150,
+    stream: true,
     messages: [
       {
         role: 'system',
