@@ -91,9 +91,8 @@ export default function App() {
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
           <MapView
             vehicles={vehicles}
-            reports={reports}
-            bikes={bikes}
             reports={allReports}
+            bikes={bikes}
             userLocation={userLocation}
             pins={pins}
             onMapClick={handleMapClick}
@@ -128,10 +127,6 @@ export default function App() {
             </div>
           )}
 
-          {/* AI traffic summary */}
-          <SummaryPanel reports={reports} vehicles={vehicles} />
-
-          {/* Intro hint */}
           <SummaryPanel reports={allReports} vehicles={vehicles} />
 
           {!reports.length && !pinMode && (

@@ -7,9 +7,12 @@ import re
 import tempfile
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -161,8 +164,8 @@ manager = ConnectionManager()
 schedule_by_line: dict[str, list[str]] = {}
 schedule_updated_at: datetime | None = None
 
-NIM_API_KEY = os.getenv("NIM_API_KEY", "")
-SIGNALR_BASE = "https://api.promet-split.hr/Fleet/hub/spatial"
+NIM_API_KEY   = os.getenv("NIM_API_KEY", "missing")
+SIGNALR_BASE  = "https://api.promet-split.hr/Fleet/hub/spatial"
 SCHEDULE_PDF_URL = (
     "https://www.promet-split.hr/Portals/0/adam/Documents/"
     "S9HqnUXeAkyufONCO6U3Ow/Files/Vozni red od 22.04.2026..pdf"
@@ -172,6 +175,9 @@ nim_client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
     api_key=NIM_API_KEY,
 )
+
+if NIM_API_KEY == "missing":
+    print("[warn] NIM_API_KEY nije postavljen — AI funkcije neće raditi")
 
 
 # ── Bearing ────────────────────────────────────────────────────────────────────
