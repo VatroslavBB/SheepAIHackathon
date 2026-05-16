@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+websockets
+httpx
+openai
+pdfplumber
+python-dotenv
