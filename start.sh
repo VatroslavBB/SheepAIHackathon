@@ -24,12 +24,13 @@ sleep 1
 
 # ── Backend ───────────────────────────────────────────────────────────────────
 echo -e "${GREEN}▸ Pokrećem backend (port ${PORT_BACKEND})...${NC}"
+cd "$BACKEND_DIR"
 "$VENV/bin/uvicorn" main:app \
-  --app-dir "$BACKEND_DIR" \
   --port "$PORT_BACKEND" \
   --reload \
   2>&1 | sed "s/^/${RED}[backend]${NC} /" &
 BACKEND_PID=$!
+cd "$FRONTEND_DIR"
 
 # Čekaj da backend postane dostupan
 echo -ne "${YELLOW}  Čekam backend..."

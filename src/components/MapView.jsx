@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMapEvents } from 'react-leaflet'
+import MarkerClusterGroup from 'react-leaflet-cluster'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -47,6 +48,25 @@ const userLocIcon = L.divIcon({
   html: '<div class="user-loc-dot"></div>',
   iconSize: [18, 18], iconAnchor: [9, 9],
 })
+
+function makeBikeIcon(station) {
+  const available = station.bikes > 0
+  const bg        = available ? '#16a34a' : '#94a3b8'
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      background:${bg};
+      color:#fff;width:30px;height:30px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      font-size:16px;line-height:1;
+      border:2px solid rgba(255,255,255,0.9);
+      box-shadow:0 2px 6px rgba(0,0,0,0.35);
+      cursor:pointer;
+    ">🚲</div>`,
+    iconSize:   [30, 30],
+    iconAnchor: [15, 15],
+  })
+}
 
 function makePinIcon(label) {
   return L.divIcon({
@@ -102,9 +122,28 @@ function IncidentMarker({ report: r, onUpvote }) {
   )
 }
 
+function BikeMarker({ station: s }) {
+  const icon = useMemo(() => makeBikeIcon(s), [s.bikes, s.ebikes])
+  return (
+    <Marker position={[s.lat, s.lng]} icon={icon}>
+      <Popup>
+        <div className="popup-line">🚲 {s.name}</div>
+        <div className="popup-detail">
+          Dostupno: <b>{s.bikes}</b> bicikala
+          {s.ebikes > 0 && <> ({s.ebikes} ⚡ e-bicikla)</>}
+          <br />Slobodnih mjesta: {s.free_racks}
+          <br /><span style={{ color: '#60a5fa', fontSize: 11 }}>
+            1 EUR / 30 min · 5 EUR / dan
+          </span>
+        </div>
+      </Popup>
+    </Marker>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function MapView({ vehicles, reports, userLocation, pins, onMapClick, onUpvote }) {
+export default function MapView({ vehicles, reports, bikes, userLocation, pins, onMapClick, onUpvote }) {
   return (
     <MapContainer
       center={[43.508, 16.440]}
@@ -115,14 +154,23 @@ export default function MapView({ vehicles, reports, userLocation, pins, onMapCl
       <ZoomControl position="bottomright" />
 
       <TileLayer
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
-        attribution="Tiles © Esri"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         maxZoom={19}
+        keepBuffer={4}
       />
 
       <ClickHandler onMapClick={onMapClick} />
 
-      {vehicles.map(v => <BusMarker key={v.id} vehicle={v} />)}
+      {vehicles.filter(v => v.status !== 6).map(v => <BusMarker key={v.id} vehicle={v} />)}
+
+      <MarkerClusterGroup
+        chunkedLoading
+        maxClusterRadius={50}
+        showCoverageOnHover={false}
+      >
+        {bikes.map(s => <BikeMarker key={s.uid} station={s} />)}
+      </MarkerClusterGroup>
 
       {reports.map(r => <IncidentMarker key={r.id} report={r} onUpvote={onUpvote} />)}
 

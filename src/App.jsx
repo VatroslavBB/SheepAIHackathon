@@ -6,10 +6,12 @@ import SummaryPanel  from './components/SummaryPanel'
 import PinLabelModal from './components/PinLabelModal'
 import { useVehicles } from './useVehicles'
 import { useReports }  from './useReports'
+import { useBikes }    from './useBikes'
 
 export default function App() {
   const { vehicles, online } = useVehicles()
   const { reports, addReport, upvoteReport } = useReports()
+  const { stations: bikes } = useBikes()
 
   // Nav pins & location
   const [pins,         setPins]         = useState([])
@@ -94,6 +96,7 @@ export default function App() {
           <MapView
             vehicles={vehicles}
             reports={reports}
+            bikes={bikes}
             userLocation={userLocation}
             pins={pins}
             onMapClick={handleMapClick}

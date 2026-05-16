@@ -21,6 +21,116 @@ app.add_middleware(
 )
 
 vehicles: dict = {}
+bike_stations: list = []   # Nextbike stanice (osvježava se svako 3 min)
+
+
+# ── Nextbike ───────────────────────────────────────────────────────────────────
+
+NEXTBIKE_CITIES = [617, 740, 802, 804]   # Split, Solin, Trogir, Kaštela
+NEXTBIKE_URL    = "https://api.nextbike.net/maps/nextbike-live.json?city=" + \
+                  ",".join(map(str, NEXTBIKE_CITIES))
+
+
+async def refresh_bikes():
+    global bike_stations
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            r = await client.get(NEXTBIKE_URL)
+            r.raise_for_status()
+        data = r.json()
+        stations: list = []
+        for country in data.get("countries", []):
+            for city in country.get("cities", []):
+                for place in city.get("places", []):
+                    if not place.get("active_place"):
+                        continue
+                    ebikes = sum(
+                        1 for b in place.get("bike_list", [])
+                        if b.get("pedelec_battery") is not None
+                    )
+                    stations.append({
+                        "uid":        place["uid"],
+                        "name":       place["name"],
+                        "lat":        place["lat"],
+                        "lng":        place["lng"],
+                        "bikes":      place.get("bikes_available_to_rent", 0),
+                        "ebikes":     ebikes,
+                        "free_racks": max(0, place.get("free_racks", 0)),
+                    })
+        bike_stations = stations
+        print(f"[bikes] Učitano {len(bike_stations)} Nextbike stanica")
+    except Exception as e:
+        print(f"[bikes] Greška: {e}")
+
+
+async def bike_refresh_loop():
+    while True:
+        await refresh_bikes()
+        await asyncio.sleep(3 * 60)
+
+
+# ── Haversine + transport ──────────────────────────────────────────────────────
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6371.0
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    dφ     = math.radians(lat2 - lat1)
+    dλ     = math.radians(lon2 - lon1)
+    a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def nearest_bike_stations(lat: float, lng: float, n: int = 1) -> list:
+    active = [s for s in bike_stations if s["bikes"] > 0]
+    return sorted(active, key=lambda s: haversine_km(lat, lng, s["lat"], s["lng"]))[:n]
+
+
+def build_transport_context(ulat: float, ulng: float, dlat: float, dlng: float) -> str:
+    dist = haversine_km(ulat, ulng, dlat, dlng)
+    lines = [f"Udaljenost polazište → odredište: {dist:.1f} km", ""]
+
+    # Bus
+    bus_min = max(5, round(dist / 0.333 + 4))
+    lines.append(f"🚌 Autobus: ~{bus_min} min | 1.30 EUR (gotovina) / 0.66 EUR (kartica)")
+
+    # Nextbike
+    ns_user = nearest_bike_stations(ulat, ulng, 1)
+    ns_dest = nearest_bike_stations(dlat, dlng, 1)
+    bike_min = max(5, round(dist / 0.2))
+    bike_eur = 1.00 if bike_min <= 30 else 2.00
+
+    if ns_user:
+        s  = ns_user[0]
+        dm = haversine_km(ulat, ulng, s["lat"], s["lng"])
+        eb = f", {s['ebikes']} e-bicikala" if s["ebikes"] else ""
+        lines.append(
+            f"🚲 Nextbike: stanica '{s['name']}' ({dm*1000:.0f} m od tebe) "
+            f"— {s['bikes']} bicikala{eb} | ~{bike_min} min | ~{bike_eur:.2f} EUR"
+        )
+        if ns_dest:
+            d  = ns_dest[0]
+            dd = haversine_km(dlat, dlng, d["lat"], d["lng"])
+            lines.append(
+                f"   Vrati kod '{d['name']}' ({dd*1000:.0f} m od odredišta"
+                f", {d['free_racks']} slobodnih mjesta)"
+            )
+    else:
+        lines.append("🚲 Nextbike: nema dostupnih bicikala u blizini")
+
+    # Uber / Taxi — gradska vožnja ~25 km/h, autocesta ~70 km/h
+    # Za kratke gradske rute koristimo 25 km/h, dodajemo 3 min za čekanje Ubera
+    car_kmh  = 25 if dist < 10 else 50
+    drive_min = max(3, round(dist / car_kmh * 60))
+    uber_wait = 3   # prosječno čekanje Ubera u Splitu
+    uber_min  = drive_min + uber_wait
+    uber_eur  = 2.50 + dist * 0.45
+    lines.append(f"🚗 Uber: ~{uber_min} min (vožnja ~{drive_min} min + ~{uber_wait} min čekanje) | ~{uber_eur:.1f}–{uber_eur+1.5:.1f} EUR")
+
+    cammeo_eur = 1.80 + dist * 0.60
+    radio_eur  = 2.00 + dist * 0.55
+    lines.append(f"🚕 Taxi: ~{drive_min} min vožnje | Cammeo ~{cammeo_eur:.1f} EUR | Radio taxi ~{radio_eur:.1f} EUR")
+
+    return "\n".join(lines)
 
 
 class ConnectionManager:
@@ -226,6 +336,7 @@ async def signalr_poller():
 async def startup():
     asyncio.create_task(signalr_poller())
     asyncio.create_task(schedule_refresh_loop())
+    asyncio.create_task(bike_refresh_loop())
 
 
 # ── REST endpoints ─────────────────────────────────────────────────────────────
@@ -238,6 +349,11 @@ def get_vehicles():
 @app.get("/api/vehicles/line/{line}")
 def get_line(line: str):
     return [v for v in vehicles.values() if v["line"] == line]
+
+
+@app.get("/api/bikes")
+def get_bikes():
+    return bike_stations
 
 
 @app.get("/api/schedule/{line}")
@@ -503,6 +619,33 @@ Live podaci uključuju smjer vožnje svakog vozila kao kompasni azimut (npr. "SI
 - Z/ZZ = zapadno (prema Trogiru)
 Koristi smjer + poziciju za procjenu dolazi li bus prema korisniku ili se udaljava.
 
+## Multimodalni prijevoz — tarife
+
+### 🚌 Autobus (Promet Split)
+- Jednokratna karta: 1.30 EUR (plaća se vozaču gotovinom)
+- Kartica: 0.66 EUR | Dnevna karta: 4.00 EUR
+
+### 🚲 Nextbike (dijeljenje bicikala)
+- Real-time podaci o stanicama dostupni su u kontekstu
+- Tarife: 30 min = 1.00 EUR | 60 min = 2.00 EUR | Dnevna = 5.00 EUR | Godišnja = 35 EUR
+- E-bicikli (pedelec) dostupni na nekim stanicama — ista cijena, električna asistencija
+- Preporuči Nextbike ako stanica ima dostupnih bicikala i udaljenost je <6 km
+
+### 🚗 Uber
+- Baza: ~2.50 EUR + ~0.45 EUR/km | Gradska brzina: ~25-30 km/h
+- Procjena: 2.50 + (km × 0.45) EUR
+
+### 🚕 Taxi
+- Cammeo Split: 1.80 EUR start + 0.60 EUR/km
+- Radio taxi Split: 2.00 EUR start + 0.55 EUR/km
+- Noćna tarifa (22:00–06:00): +20%
+
+### Preporuke po udaljenosti
+- <1 km: pješice (10-15 min) ili Nextbike
+- 1–4 km: Nextbike ili autobus (~1.30 EUR)
+- 4–10 km: autobus ili Uber (~5–7 EUR)
+- >10 km: Uber ili taxi (~8–15 EUR)
+
 ## Kako koristiti korisnikovu lokaciju i pinove
 - Ako je poznata GPS lokacija korisnika: prepoznaj kvart (usporedi s koordinatama) i predloži najbliže linije.
 - Ako je pin postavljen kao odredište: pronađi koji kvart/POI je najbliži pinu i koje linije tamo idu.
@@ -514,16 +657,32 @@ Koristi smjer + poziciju za procjenu dolazi li bus prema korisniku ili se udalja
 UVIJEK govori o LINIJAMA, nikad o ID-u vozila. Korisnik ne zna što je "vozilo #1042".
 
 - Linija s jednim vozilom: "Linija 7 trenutno je kod Žnjana i kreće prema centru."
-- Linija s više vozila: opiši svako po lokaciji i smjeru — "Linija 7 ima 3 aktivna autobusa:
-  jedan je kod Žnjana i ide prema centru, drugi je kod Spinuta i kreće prema Trajektnoj luci,
-  treći stoji na stajalištu kod Zapadne obale."
-- Za procjenu lokacije: usporedi lat/lng s koordinatama kvartova (razlika < 0.005° ≈ 500 m).
-  Prevedi koordinate u ime kvarta ili ulice — nikad ne izgovaraj gole koordinate korisniku.
-- Za ETA: procijeni na temelju udaljenosti i smjera vožnje (gradski bus ~20 km/h prosjek).
-- Smjer korisno tumači: npr. "kreće prema centru", "udaljava se od terminusa", "ide prema moru".
+- Linija s više vozila: opiši svako po lokaciji i smjeru.
+- Prevedi koordinate u ime kvarta — nikad ne izgovaraj gole koordinate korisniku.
+- Za ETA: procijeni na temelju udaljenosti i smjera (gradski bus ~20 km/h).
 - Vozni red: ako su dostupni polasci, navedi ih. Inače uputi na promet-split.hr/vozni-red.
 - Ne izmišljaj podatke. Ako linija nema aktivnih vozila, jasno reci.
-- Nikad ne spominji: ID vozila, broj garaže, sirove koordinate, tehničke detalje API-ja."""
+- Nikad ne spominji: ID vozila, broj garaže, sirove koordinate, tehničke detalje API-ja.
+
+## Kad korisnik pita "kako doći" ili "prijevoz"
+
+UVIJEK navedi SVE četiri opcije — autobus, Nextbike, Uber i taxi — čak i ako korisnik pita samo za jednu.
+Format odgovora (OBAVEZNO uključi trajanje za svaku opciju):
+
+🚌 Autobus: linija X prema [odredište] — ~X min | 1.30 EUR
+🚲 Nextbike: stanica "[naziv]" (Xm), Z bicikala — ~X min vožnje | ~Y EUR
+🚗 Uber: ~X min (vožnja ~Y min + ~3 min čekanje) | ~Y–Z EUR
+🚕 Taxi: ~X min vožnje | Cammeo ~Y EUR | Radio taxi ~Z EUR
+
+VAŽNO: Za auto/taxi UVIJEK napiši trajanje vožnje u minutama — korisnik želi znati i koliko traje vožnja, a ne samo cijenu.
+Ako nema podataka o lokaciji korisnika, svejedno objasni koje linije postoje i nabroji opcije s okvirnim cijenama.
+
+## Nextbike — obavezno preporučaj
+
+Kad korisnik pita za bicikl, **UVIJEK preporuči Nextbike** — to je javni sustav dijeljenja bicikala u Splitu.
+Nikad ne pretpostavljaj da korisnik ima vlastiti bicikl — predloži Nextbike kao rješenje.
+Real-time podaci o stanicama su dostupni u kontekstu (lokacija, broj bicikala, e-bicikli).
+Ako nema dostupnih bicikala na bližnjoj stanici, navedi sljedeću najbližu stanicu."""
 
 
 @app.post("/api/chat")
@@ -556,6 +715,15 @@ async def chat(body: dict):
             for r in reports[:10]
         ]
         location_parts.append("Aktivni prometni incidenti (prijavljeni od korisnika):\n" + "\n".join(lines))
+
+    # Transport opcije — izračunaj samo ako korisnik ima lokaciju I odredišni pin
+    if user_location and pins:
+        dest = pins[0]
+        transport_ctx = build_transport_context(
+            user_location["lat"], user_location["lng"],
+            dest["lat"], dest["lng"],
+        )
+        location_parts.append(f"Procjena prijevoznih opcija:\n{transport_ctx}")
 
     if location_parts:
         messages.append({"role": "system", "content": "\n\n".join(location_parts)})
