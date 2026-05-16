@@ -1,9 +1,10 @@
-SPLIT // PROMETNI AGENT — Technical Summary
-What It Is
+# SPLIT // PROMETNI AGENT — Technical Summary
+## What It Is
 A real-time urban mobility intelligence platform for Split, Croatia. It aggregates live bus positions, user-reported traffic incidents, bike-sharing availability, and OSM road construction data into a single map view, with an LLM-powered chat agent that answers routing questions using all of that live context.
 
-Architecture
+## Architecture
 
+```
 Browser (Vercel CDN)
   │
   ├─ WebSocket ──────────────────────────► Railway (FastAPI)
@@ -14,10 +15,11 @@ Browser (Vercel CDN)
   │    PostgreSQL (incident reports)           └─ Overpass proxy
   │
   └─ Overpass mirrors (construction/validation)
-Tech Stack
+```
+### Tech Stack
 Layer	Technology
-Frontend	React 18, Vite, react-leaflet, react-leaflet-cluster
-Backend	FastAPI (Python), uvicorn, httpx, websockets
+Frontend:	React 18, Vite, react-leaflet, react-leaflet-cluster
+Backend:	FastAPI (Python), uvicorn, httpx, websockets
 Database	Supabase (PostgreSQL + realtime subscriptions)
 AI	NVIDIA NIM — meta/llama-3.3-70b-instruct (summarize), meta/llama-3.1-70b-instruct (chat)
 Deploy	Vercel (frontend static), Railway (backend persistent)
@@ -49,20 +51,15 @@ The system prompt includes 40+ named coordinates for Split neighbourhoods, POIs,
 
 Language is enforced via a separate system message ("Respond exclusively in English." / "Odgovaraj isključivo na hrvatskom jeziku.") injected before the vehicle context.
 
-Key Features
-Location validation — Before opening the incident report modal, two parallel Overpass queries run: is_in(lat, lng) to check if the clicked point is inside a water/forest/farmland area, and way(around:200)["highway"] to confirm a road is within 200 m. Fails open (allows report) if Overpass is unreachable.
+## Key Features
+**Location validation** — Before opening the incident report modal, two parallel Overpass queries run: is_in(lat, lng) to check if the clicked point is inside a water/forest/farmland area, and way(around:200)["highway"] to confirm a road is within 200 m. Fails open (allows report) if Overpass is unreachable.
 
-Vote deduplication — Each browser stores a Set of voted report IDs in localStorage. upvoteReport checks the set before calling Supabase, so the same device can only confirm each incident once regardless of page refreshes.
+**Vote deduplication** — Each browser stores a Set of voted report IDs in localStorage. upvoteReport checks the set before calling Supabase, so the same device can only confirm each incident once regardless of page refreshes.
 
-Real-time bus heading — The backend tracks the previous position of each vehicle. When a new position arrives and the vehicle has moved more than ~11 m, it recalculates bearing using the haversine formula and stores the compass direction. This drives the animated arrow ring on each bus marker.
+**Real-time bus heading** — The backend tracks the previous position of each vehicle. When a new position arrives and the vehicle has moved more than ~11 m, it recalculates bearing using the haversine formula and stores the compass direction. This drives the animated arrow ring on each bus marker.
 
-PDF schedule parsing — On startup (and every 6 hours), the backend downloads the HŽ / Promet Split timetable PDF, extracts departure times using pdfplumber with a regex for HH:MM patterns grouped by line identifier, and makes them available to the AI chat context.
+**PDF schedule parsing** — On startup (and every 6 hours), the backend downloads the HŽ / Promet Split timetable PDF, extracts departure times using pdfplumber with a regex for HH:MM patterns grouped by line identifier, and makes them available to the AI chat context.
 
-Multilingual UI — A React context (LangContext) holds all UI strings for Croatian and English. Switching language resets the chat history and re-fetches the AI summary in the new language. The language is sent with every API request so the backend LLM responds in the correct language.
+**Multilingual UI** — A React context (LangContext) holds all UI strings for Croatian and English. Switching language resets the chat history and re-fetches the AI summary in the new language. The language is sent with every API request so the backend LLM responds in the correct language.
 
-Mobile layout — Below 768 px, the map and chat panels switch to a fullscreen tab layout with a bottom navigation bar. Above 768 px, both panels are visible side by side.
-
-Deployment
-Railway runs the FastAPI backend continuously — required because it maintains a persistent SignalR WebSocket to the bus operator's server and a persistent WebSocket server for frontend clients. Timetable PDFs are parsed on startup.
-Vercel serves the static Vite build. All dynamic calls use VITE_BACKEND_URL to reach Railway directly. No serverless functions on Vercel.
-Supabase is the only service accessed directly from the browser (incident CRUD + realtime).
+**Mobile layout** — Below 768 px, the map and chat panels switch to a fullscreen tab layout with a bottom navigation bar. Above 768 px, both panels are visible side by side.
