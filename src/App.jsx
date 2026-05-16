@@ -1,11 +1,14 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import MapView from './components/MapView'
 import ReportModal from './components/ReportModal'
 import SummaryPanel from './components/SummaryPanel'
 import { useReports } from './useReports'
+import { useRoadData } from './useRoadData'
 
 export default function App() {
   const { reports, addReport, upvoteReport, votedIds } = useReports()
+  const autoReports = useRoadData()
+  const allReports = useMemo(() => [...reports, ...autoReports], [reports, autoReports])
   const [pendingLatlng, setPendingLatlng] = useState(null)
   const [modalLoading, setModalLoading] = useState(false)
 
@@ -27,13 +30,13 @@ export default function App() {
   return (
     <div style={{ height: '100dvh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
       <MapView
-        reports={reports}
+        reports={allReports}
         onMapClick={handleMapClick}
         onUpvote={upvoteReport}
         votedIds={votedIds}
       />
 
-      <SummaryPanel reports={reports} />
+      <SummaryPanel reports={allReports} />
 
       {!reports.length && (
         <div style={{
