@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { API_BASE } from '../api'
 
 const QUICK_PROMPTS = [
   { label: 'Linija 7?',  text: 'Gdje je sada linija 7 i u kojem smjeru ide?' },
@@ -37,7 +38,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
     const nextHistory = [...history, { role: 'user', content: userText }]
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

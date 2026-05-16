@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import MapView       from './components/MapView'
 import ChatPanel     from './components/ChatPanel'
 import ReportModal   from './components/ReportModal'
@@ -7,21 +7,20 @@ import PinLabelModal from './components/PinLabelModal'
 import { useVehicles } from './useVehicles'
 import { useReports }  from './useReports'
 import { useBikes }    from './useBikes'
+import { useRoadData } from './useRoadData'
 
 export default function App() {
   const { vehicles, online } = useVehicles()
   const { reports, addReport, upvoteReport } = useReports()
   const { stations: bikes } = useBikes()
+  const autoReports = useRoadData()
+  const allReports = useMemo(() => [...reports, ...autoReports], [reports, autoReports])
 
-  // Nav pins & location
   const [pins,         setPins]         = useState([])
   const [pinMode,      setPinMode]      = useState(false)
   const [userLocation, setUserLocation] = useState(null)
   const [pendingPin,   setPendingPin]   = useState(null)
-
-  // Incident reporting
   const [pendingReport, setPendingReport] = useState(null)
-  const [prefilled,     setPrefilled]     = useState(null)
   const [modalLoading,  setModalLoading]  = useState(false)
 
   // Map click: pin mode → pin, else → incident report
@@ -30,7 +29,6 @@ export default function App() {
       setPendingPin(latlng)
       setPinMode(false)
     } else {
-      setPrefilled(null)
       setPendingReport(latlng)
     }
   }, [pinMode])
@@ -40,7 +38,6 @@ export default function App() {
     await addReport(data)
     setModalLoading(false)
     setPendingReport(null)
-    setPrefilled(null)
   }, [addReport])
 
   const handleLocate = useCallback(() => {
@@ -58,7 +55,6 @@ export default function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
 
-      {/* ── Header ── */}
       <header style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '0 20px', height: 52, flexShrink: 0,
@@ -75,6 +71,9 @@ export default function App() {
           {reports.length > 0 && (
             <span>INCIDENTI <span style={{ color: '#fbbf24', fontWeight: 500 }}>{reports.length}</span></span>
           )}
+          {autoReports.length > 0 && (
+            <span>RADOVI <span style={{ color: '#f97316', fontWeight: 500 }}>{autoReports.length}</span></span>
+          )}
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: 'DM Mono, monospace', color: '#64748b' }}>
@@ -82,28 +81,25 @@ export default function App() {
             width: 7, height: 7, borderRadius: '50%',
             background: online ? '#22c55e' : '#64748b',
             boxShadow: online ? '0 0 6px #22c55e88' : 'none',
-            animation: online ? 'pulse 2s infinite' : 'none',
           }} />
           <span>{online ? `${activeBuses} u vožnji` : 'offline'}</span>
         </div>
       </header>
 
-      {/* ── Body: map + chat ── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
 
-        {/* ── Map area ── */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
           <MapView
             vehicles={vehicles}
             reports={reports}
             bikes={bikes}
+            reports={allReports}
             userLocation={userLocation}
             pins={pins}
             onMapClick={handleMapClick}
             onUpvote={upvoteReport}
           />
 
-          {/* Map toolbar */}
           <div className="map-toolbar">
             <button
               className={`map-btn ${userLocation ? 'active' : ''}`}
@@ -122,7 +118,6 @@ export default function App() {
             >✕</button>
           </div>
 
-          {/* Pin mode hint */}
           {pinMode && (
             <div style={{
               position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
@@ -137,6 +132,8 @@ export default function App() {
           <SummaryPanel reports={reports} vehicles={vehicles} />
 
           {/* Intro hint */}
+          <SummaryPanel reports={allReports} vehicles={vehicles} />
+
           {!reports.length && !pinMode && (
             <div style={{
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
@@ -148,18 +145,15 @@ export default function App() {
           )}
         </div>
 
-        {/* ── Chat panel ── */}
-        <ChatPanel userLocation={userLocation} pins={pins} reports={reports} />
+        <ChatPanel userLocation={userLocation} pins={pins} reports={allReports} />
       </div>
 
-      {/* ── Modals ── */}
       {pendingReport && (
         <ReportModal
           latlng={pendingReport}
-          prefilled={prefilled}
           loading={modalLoading}
           onConfirm={handleReportConfirm}
-          onCancel={() => { setPendingReport(null); setPrefilled(null) }}
+          onCancel={() => setPendingReport(null)}
         />
       )}
 

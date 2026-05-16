@@ -11,6 +11,8 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/nvidia-api/, ''),
       },
+      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/ws':  { target: 'http://localhost:8000', ws: true, changeOrigin: true },
     },
   },
 })
