@@ -44,7 +44,7 @@ function ClickHandler({ onMapClick }) {
 const TYPE_LABELS = { jam: 'Gužva', accident: 'Nesreća', closed: 'Zatvoreno' }
 const SEVERITY_LABELS = { low: 'Mala', medium: 'Srednja', high: 'Visoka' }
 
-export default function MapView({ reports, onMapClick, onUpvote }) {
+export default function MapView({ reports, onMapClick, onUpvote, votedIds = new Set() }) {
   return (
     <MapContainer
       center={[43.5081, 16.4402]}
@@ -77,12 +77,16 @@ export default function MapView({ reports, onMapClick, onUpvote }) {
               </div>
               <button
                 onClick={() => onUpvote(report.id)}
+                disabled={votedIds.has(report.id)}
                 style={{
-                  background: '#2563eb', color: 'white', border: 'none',
-                  borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 13,
+                  background: votedIds.has(report.id) ? '#94a3b8' : '#2563eb',
+                  color: 'white', border: 'none',
+                  borderRadius: 6, padding: '4px 12px',
+                  cursor: votedIds.has(report.id) ? 'default' : 'pointer',
+                  fontSize: 13,
                 }}
               >
-                + Potvrdi
+                {votedIds.has(report.id) ? '✓ Potvrđeno' : '+ Potvrdi'}
               </button>
             </div>
           </Popup>

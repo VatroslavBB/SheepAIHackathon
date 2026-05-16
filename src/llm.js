@@ -2,16 +2,36 @@ import OpenAI from 'openai'
 
 const client = new OpenAI({
   apiKey: import.meta.env.VITE_NVIDIA_API_KEY,
-  baseURL: 'https://integrate.api.nvidia.com/v1',
+  baseURL: '/nvidia-api/v1',
   dangerouslyAllowBrowser: true,
 })
 
 const MODEL = 'meta/llama-3.3-70b-instruct'
 
+function extractText(stream) {
+  let text = ''
+  for (const chunk of stream) {
+    text += chunk.choices[0]?.delta?.content ?? ''
+  }
+  return text.trim()
+}
+
+function parseJSON(raw) {
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim()
+  const start = stripped.indexOf('{')
+  const end = stripped.lastIndexOf('}')
+  if (start === -1 || end === -1) throw new Error('No JSON object found')
+  return JSON.parse(stripped.slice(start, end + 1))
+}
+
 export async function parseIncidentFromText(text) {
-  const response = await client.chat.completions.create({
+  const stream = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 256,
+    stream: true,
     messages: [
       {
         role: 'system',
@@ -25,7 +45,9 @@ If location is unclear, use "Nepoznata lokacija".`,
     ],
   })
 
-  return JSON.parse(response.choices[0].message.content)
+  const chunks = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return parseJSON(extractText(chunks))
 }
 
 export async function summarizeCluster(reports) {
@@ -35,9 +57,10 @@ export async function summarizeCluster(reports) {
     .map(r => `- ${r.type} at ${r.location} (${r.severity} severity)`)
     .join('\n')
 
-  const response = await client.chat.completions.create({
+  const stream = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 150,
+    stream: true,
     messages: [
       {
         role: 'system',
@@ -50,5 +73,7 @@ export async function summarizeCluster(reports) {
     ],
   })
 
-  return response.choices[0].message.content
+  const chunks = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return extractText(chunks)
 }

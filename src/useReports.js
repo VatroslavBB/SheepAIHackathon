@@ -2,9 +2,20 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase } from './supabase'
 
 const EXPIRY_MINUTES = 45
+const VOTED_KEY = 'splitpromet_voted'
+
+function loadVoted() {
+  try { return new Set(JSON.parse(localStorage.getItem(VOTED_KEY) || '[]')) }
+  catch { return new Set() }
+}
+
+function saveVoted(set) {
+  localStorage.setItem(VOTED_KEY, JSON.stringify([...set]))
+}
 
 export function useReports() {
   const [reports, setReports] = useState([])
+  const [voted, setVoted] = useState(loadVoted)
 
   const fetchReports = useCallback(async () => {
     const since = new Date(Date.now() - EXPIRY_MINUTES * 60 * 1000).toISOString()
@@ -38,15 +49,22 @@ export function useReports() {
   }, [])
 
   const upvoteReport = useCallback(async (id) => {
+    if (voted.has(id)) return
     const report = reports.find(r => r.id === id)
     if (!report) return
+
+    const next = new Set(voted)
+    next.add(id)
+    setVoted(next)
+    saveVoted(next)
+
     await supabase
       .from('reports')
       .update({ votes: report.votes + 1 })
       .eq('id', id)
 
     setReports(prev => prev.map(r => r.id === id ? { ...r, votes: r.votes + 1 } : r))
-  }, [reports])
+  }, [reports, voted])
 
-  return { reports, addReport, upvoteReport, refresh: fetchReports }
+  return { reports, addReport, upvoteReport, votedIds: voted, refresh: fetchReports }
 }

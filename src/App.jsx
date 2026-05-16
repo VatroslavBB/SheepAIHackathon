@@ -8,10 +8,11 @@ import { useVoice } from './useVoice'
 import { parseIncidentFromText } from './llm'
 
 export default function App() {
-  const { reports, addReport, upvoteReport } = useReports()
+  const { reports, addReport, upvoteReport, votedIds } = useReports()
   const [pendingLatlng, setPendingLatlng] = useState(null)
   const [prefilled, setPrefilled] = useState(null)
   const [modalLoading, setModalLoading] = useState(false)
+  const [voiceParsing, setVoiceParsing] = useState(false)
 
   const handleMapClick = useCallback((latlng) => {
     setPrefilled(null)
@@ -20,15 +21,15 @@ export default function App() {
 
   const handleVoiceResult = useCallback(async (text) => {
     const splitCenter = { lat: 43.5081, lng: 16.4402 }
-    setPendingLatlng(splitCenter)
-    setModalLoading(true)
+    setVoiceParsing(true)
     try {
       const parsed = await parseIncidentFromText(text)
       setPrefilled(parsed)
     } catch {
       setPrefilled(null)
     } finally {
-      setModalLoading(false)
+      setVoiceParsing(false)
+      setPendingLatlng(splitCenter)
     }
   }, [])
 
@@ -53,12 +54,14 @@ export default function App() {
         reports={reports}
         onMapClick={handleMapClick}
         onUpvote={upvoteReport}
+        votedIds={votedIds}
       />
 
       <SummaryPanel reports={reports} />
 
       <VoiceButton
         listening={listening}
+        processing={voiceParsing}
         onClick={listening ? stopVoice : startVoice}
       />
 

@@ -1,5 +1,12 @@
 import { useState, useRef, useCallback } from 'react'
 
+const ERROR_MESSAGES = {
+  'not-allowed': 'Dopusti pristup mikrofonu u postavkama preglednika.',
+  'no-speech': 'Nije detektiran govor. Pokušaj ponovo.',
+  'network': 'Mrežna greška pri prepoznavanju govora.',
+  'audio-capture': 'Mikrofon nije pronađen.',
+}
+
 export function useVoice({ onResult }) {
   const [listening, setListening] = useState(false)
   const [transcript, setTranscript] = useState('')
@@ -8,7 +15,7 @@ export function useVoice({ onResult }) {
   const start = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) {
-      alert('Voice recognition not supported in this browser. Try Chrome.')
+      alert('Prepoznavanje govora nije podržano. Koristi Chrome.')
       return
     }
 
@@ -20,7 +27,11 @@ export function useVoice({ onResult }) {
 
     recognition.onstart = () => setListening(true)
     recognition.onend = () => setListening(false)
-    recognition.onerror = () => setListening(false)
+    recognition.onerror = (event) => {
+      setListening(false)
+      const msg = ERROR_MESSAGES[event.error] || `Greška: ${event.error}`
+      alert(msg)
+    }
     recognition.onresult = (event) => {
       const text = event.results[0][0].transcript
       setTranscript(text)
