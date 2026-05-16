@@ -1,0 +1,575 @@
+import asyncio
+import json
+import httpx
+import websockets
+import math
+import re
+import tempfile
+import os
+from datetime import datetime
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+vehicles: dict = {}
+
+
+class ConnectionManager:
+    def __init__(self):
+        self._clients: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self._clients.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self._clients = [c for c in self._clients if c is not ws]
+
+    async def broadcast(self, msg: dict):
+        dead = []
+        for ws in self._clients:
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+
+manager = ConnectionManager()
+
+# Vozni red: linija -> sortirani list polaznih vremena (HH:MM)
+schedule_by_line: dict[str, list[str]] = {}
+schedule_updated_at: datetime | None = None
+
+NIM_API_KEY = os.getenv("NIM_API_KEY", "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")
+SIGNALR_BASE = "https://api.promet-split.hr/Fleet/hub/spatial"
+SCHEDULE_PDF_URL = (
+    "https://www.promet-split.hr/Portals/0/adam/Documents/"
+    "S9HqnUXeAkyufONCO6U3Ow/Files/Vozni red od 22.04.2026..pdf"
+)
+
+nim_client = OpenAI(
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key=NIM_API_KEY,
+)
+
+
+# ── Bearing ────────────────────────────────────────────────────────────────────
+
+def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    dLon = math.radians(lon2 - lon1)
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    y = math.sin(dLon) * math.cos(φ2)
+    x = math.cos(φ1) * math.sin(φ2) - math.sin(φ1) * math.cos(φ2) * math.cos(dLon)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def bearing_to_compass(b: float) -> str:
+    pts = ["S", "SSI", "SI", "ISI", "I", "IJI", "JI", "JJI",
+           "J", "JJZ", "JZ", "ZJZ", "Z", "ZSZ", "SZ", "SSZ"]
+    return pts[round(b / 22.5) % 16]
+
+
+# ── Vozni red (PDF) ────────────────────────────────────────────────────────────
+
+def parse_schedule_text(text: str) -> dict[str, list[str]]:
+    """Izvuci polazna vremena po linijama iz raw PDF teksta."""
+    result: dict[str, list[str]] = {}
+    current_line: str | None = None
+    time_re = re.compile(r'\b([0-1]?[0-9]|2[0-3]):[0-5][0-9]\b')
+    line_re = re.compile(r'(?:LINIJA|Linija|L\.)\s*([A-Z0-9]+)', re.IGNORECASE)
+
+    for row in text.splitlines():
+        m = line_re.search(row)
+        if m:
+            current_line = m.group(1).upper()
+            result.setdefault(current_line, [])
+        if current_line:
+            for t in time_re.findall(row):
+                if t not in result[current_line]:
+                    result[current_line].append(t)
+
+    return {k: sorted(v) for k, v in result.items() if v}
+
+
+async def refresh_schedule():
+    global schedule_by_line, schedule_updated_at
+    try:
+        import pdfplumber
+    except ImportError:
+        print("[schedule] pdfplumber nije instaliran — instaliraj: pip install pdfplumber")
+        return
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
+            r = await client.get(SCHEDULE_PDF_URL, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(r.content)
+            tmp = f.name
+
+        try:
+            pages_text: list[str] = []
+            with pdfplumber.open(tmp) as pdf:
+                for page in pdf.pages:
+                    pages_text.append(page.extract_text() or "")
+            schedule_by_line = parse_schedule_text("\n".join(pages_text))
+            schedule_updated_at = datetime.now()
+            print(f"[schedule] Učitan vozni red — {len(schedule_by_line)} linija")
+        finally:
+            os.unlink(tmp)
+
+    except Exception as e:
+        print(f"[schedule] Greška: {e}")
+
+
+async def schedule_refresh_loop():
+    while True:
+        await refresh_schedule()
+        await asyncio.sleep(6 * 3600)  # osvježi svako 6h
+
+
+def upcoming_departures(line: str, n: int = 6) -> list[str]:
+    times = schedule_by_line.get(line, [])
+    now = datetime.now().strftime("%H:%M")
+    future = [t for t in times if t >= now]
+    return future[:n] or times[:n]  # ako nema više danas, vrati prve jutarnje
+
+
+# ── SignalR poller ─────────────────────────────────────────────────────────────
+
+async def signalr_negotiate() -> str:
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{SIGNALR_BASE}/negotiate?negotiateVersion=1",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        data = r.json()
+        return data.get("connectionToken") or data.get("connectionId", "")
+
+
+async def signalr_poller():
+    while True:
+        try:
+            token = await signalr_negotiate()
+            import urllib.parse
+            ws_url = f"wss://api.promet-split.hr/Fleet/hub/spatial?id={urllib.parse.quote(token)}"
+
+            print(f"[poller] Spajam se na {ws_url}")
+            async with websockets.connect(
+                ws_url,
+                additional_headers={"User-Agent": "Mozilla/5.0"},
+                ping_interval=30,
+            ) as ws:
+                await ws.send(json.dumps({"protocol": "json", "version": 1}) + "\x1e")
+                handshake = await ws.recv()
+                print(f"[poller] Handshake: {handshake}")
+
+                async for raw in ws:
+                    for chunk in raw.split("\x1e"):
+                        chunk = chunk.strip()
+                        if not chunk:
+                            continue
+                        try:
+                            msg = json.loads(chunk)
+                        except json.JSONDecodeError:
+                            continue
+
+                        if msg.get("target") == "ReceiveVehicleData":
+                            v = msg["arguments"][0]
+                            vid = v["id"]
+                            prev = vehicles.get(vid)
+
+                            new_lat, new_lng = v["latitude"], v["longitude"]
+
+                            # Zadrži stari heading ako se vozilo nije pomaknulo dovoljno
+                            heading = prev.get("heading") if prev else None
+                            compass = prev.get("compass") if prev else None
+
+                            if prev and v["vehicleStatus"] == 1:
+                                dist = math.hypot(new_lat - prev["lat"], new_lng - prev["lng"])
+                                if dist > 0.0001:  # ~11 m minimalni pomak
+                                    heading = calculate_bearing(prev["lat"], prev["lng"], new_lat, new_lng)
+                                    compass = bearing_to_compass(heading)
+
+                            vehicles[vid] = {
+                                "id": vid,
+                                "line": v["name"],
+                                "garage": v["garageNumber"],
+                                "status": v["vehicleStatus"],
+                                "lat": new_lat,
+                                "lng": new_lng,
+                                "timestamp": v["timestamp"],
+                                "heading": heading,
+                                "compass": compass,
+                            }
+                            await manager.broadcast({"type": "update", "data": vehicles[vid]})
+
+        except Exception as e:
+            print(f"[poller] Greška: {e}, restartiram za 5s...")
+            await asyncio.sleep(5)
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(signalr_poller())
+    asyncio.create_task(schedule_refresh_loop())
+
+
+# ── REST endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/api/vehicles")
+def get_vehicles():
+    return list(vehicles.values())
+
+
+@app.get("/api/vehicles/line/{line}")
+def get_line(line: str):
+    return [v for v in vehicles.values() if v["line"] == line]
+
+
+@app.get("/api/schedule/{line}")
+def get_schedule(line: str):
+    times = schedule_by_line.get(line.upper(), [])
+    return {
+        "line": line,
+        "departures": times,
+        "upcoming": upcoming_departures(line.upper()),
+        "updated_at": schedule_updated_at.isoformat() if schedule_updated_at else None,
+    }
+
+
+# ── WebSocket: real-time vehicle stream → frontend ────────────────────────────
+
+@app.websocket("/ws/vehicles")
+async def ws_vehicles(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        # Pošalji trenutno stanje odmah pri spajanju
+        await ws.send_json({"type": "full", "data": list(vehicles.values())})
+        # Svakih 30s pošalji puni snapshot (sinkronizira brisanja/nestanke vozila)
+        while True:
+            await asyncio.sleep(30)
+            await ws.send_json({"type": "full", "data": list(vehicles.values())})
+    except (WebSocketDisconnect, Exception):
+        manager.disconnect(ws)
+
+
+# ── Chat ───────────────────────────────────────────────────────────────────────
+
+def build_vehicle_context() -> str:
+    if not vehicles:
+        return "Nema trenutnih podataka o vozilima."
+
+    now = datetime.now().strftime("%H:%M:%S")
+    lines: dict[str, list] = {}
+    for v in vehicles.values():
+        lines.setdefault(v["line"], []).append(v)
+
+    active_total = sum(1 for v in vehicles.values() if v["status"] == 1)
+    parts = [
+        f"Praćenih vozila: {len(vehicles)} | U vožnji: {active_total} | Linija: {len(lines)} | Podaci: {now}",
+        "",
+    ]
+
+    for line_name, vs in sorted(lines.items(), key=lambda x: x[0].zfill(3)):
+        active  = [v for v in vs if v["status"] == 1]
+        stopped = [v for v in vs if v["status"] == 3]
+        off     = [v for v in vs if v["status"] == 6]
+
+        counts = f"{len(active)} u vožnji"
+        if stopped: counts += f", {len(stopped)} na stajalištu"
+        if off:     counts += f", {len(off)} izvan usluge"
+
+        # Sljedeći polasci iz voznog reda (ako postoje)
+        upcoming = upcoming_departures(line_name)
+        sched_str = f" | sljedeći polasci: {', '.join(upcoming)}" if upcoming else ""
+
+        parts.append(f"Linija {line_name} [{counts}]{sched_str}:")
+
+        for v in active:
+            compass  = v.get("compass")
+            heading  = v.get("heading")
+            dir_str  = f" → {compass} ({heading:.0f}°)" if compass and heading is not None else ""
+            parts.append(f"  #{v['id']}: ({v['lat']:.4f}, {v['lng']:.4f}){dir_str}")
+
+        for v in stopped:
+            parts.append(f"  #{v['id']}: ({v['lat']:.4f}, {v['lng']:.4f}) [stajalište]")
+
+    return "\n".join(parts)
+
+
+SYSTEM_PROMPT = """Ti si prometni asistent za javni prijevoz Promet Split.
+Odgovaraš na pitanja o trenutnoj lokaciji autobusa, procijenjenim vremenima dolaska i prometnim uvjetima.
+Imaš pristup live GPS podacima o svim aktivnim vozilima Promet Split. Koordinate su WGS84 (lat/lng).
+Odgovaraj kratko i konkretno, na hrvatskom jeziku. Ako vozilo nije aktivno, reci korisniku.
+
+## Statusovi vozila
+1 = u vožnji | 3 = na stajalištu | 6 = izvan usluge / garaža
+
+## Ključne koordinate područja
+
+### Split – kvartovi
+- Centar / HNK / Pjaca: 43.5081, 16.4402
+- Trajektna luka: 43.5050, 16.4372
+- Zapadna obala / Sv. Frane: 43.5078, 16.4296
+- Bene / Plaža Bačvice: 43.5020, 16.4440
+- Zenta: 43.5055, 16.4400
+- Spinut: 43.5155, 16.4370
+- Lora: 43.5095, 16.4265
+- Mejaši: 43.5185, 16.4430
+- Sirobuja: 43.5265, 16.4355
+- Brda: 43.5310, 16.4460
+- Brnik: 43.5250, 16.4530
+- Kila: 43.5295, 16.4355
+- Kopilica: 43.5150, 16.4570
+- Pazdigrad: 43.5145, 16.4650
+- Pujanke: 43.5175, 16.4690
+- Kampus (FESB): 43.5130, 16.4655
+- Ravne njive: 43.5200, 16.4665
+- Trstenik: 43.5110, 16.4715
+- Žnjan: 43.4958, 16.4748
+- Duilovo: 43.4995, 16.4835
+- Zvončac: 43.5048, 16.4345
+- Gripe / Bolnice: 43.5090, 16.4530
+- Dubrovačka: 43.5210, 16.4505
+- Stobreč: 43.4910, 16.4895
+- Žrnovnica: 43.5005, 16.5155
+
+### Solin
+- Solin centar: 43.5395, 16.4805
+- Vranjic: 43.5295, 16.4750
+- Japirko: 43.5420, 16.4725
+- Ninčevići: 43.5445, 16.4910
+- Dračevac: 43.5500, 16.4855
+- Mravince: 43.5465, 16.4755
+- Klis: 43.5527, 16.5330
+
+### 7 Kaštela (zapad → istok)
+- Kaštel Štafilić: 43.5505, 16.3245
+- Kaštel Novi: 43.5555, 16.3385
+- Kaštel Stari: 43.5610, 16.3545
+- Kaštel Lukšić: 43.5645, 16.3740
+- Kaštel Kambelovac: 43.5660, 16.3880
+- Kaštel Gomilica: 43.5655, 16.3985
+- Kaštel Sućurac (Strinje): 43.5640, 16.4195
+- Zračna luka Split (Airport): 43.5390, 16.2975
+
+### Trogir i okolica
+- Trogir centar: 43.5165, 16.2498
+- Seget: 43.5100, 16.2700
+- Plano / Primorski dolac: 43.5590, 16.3100
+
+### Ostale destinacije
+- Podstrana / Mutogras: 43.4845, 16.5225
+- Dugopolje: 43.5945, 16.5970
+- Omiš: 43.4435, 16.6908
+- Kučine: 43.5690, 16.5195
+- Tugare / Naklice: 43.5270, 16.5890
+
+## Točke interesa (POI)
+
+### Split – Kupovina & tržnice
+- Gradska tržnica (Pazar): 43.5095, 16.4445
+- Joker Kopilica: 43.5145, 16.4562
+- Tommy Trstenik: 43.5108, 16.4700
+- Mercator / Konzum zona centar: 43.5085, 16.4430
+- Brodosplit komercijalna zona: 43.5075, 16.4260
+
+### Split – Zdravstvo
+- KBC Split – Firule (Klinički bolnički centar): 43.5042, 16.4543
+- Dom zdravlja Split centar: 43.5085, 16.4415
+
+### Split – Obrazovanje
+- FESB (Fakultet elektrotehnike, strojarstva i brodogradnje): 43.5135, 16.4666
+- Ekonomski fakultet: 43.5090, 16.4460
+- Pravni i Filozofski fakultet: 43.5085, 16.4475
+- Medicinski fakultet / KBC: 43.5042, 16.4543
+
+### Split – Kultura, sport & znamenitosti
+- Dioklecijanova palača – Peristil: 43.5081, 16.4402
+- Katedrala sv. Duje: 43.5082, 16.4404
+- Zlatna vrata (sjever palače): 43.5090, 16.4407
+- Srebrena vrata (istok palače): 43.5081, 16.4415
+- Brončana vrata / Riva: 43.5073, 16.4402
+- Prokurative – Trg Republike: 43.5078, 16.4394
+- Muzej grada Splita: 43.5082, 16.4408
+- Meštrović galerija: 43.5098, 16.4265
+- Park Marjan: 43.5110, 16.4200
+- Stadion Poljud (HNK Hajduk): 43.5188, 16.4338
+- Hajdukovo sportsko igralište Neslanovac: 43.5165, 16.4305
+
+### Split – Plaže
+- Bačvice: 43.5018, 16.4458
+- Firule: 43.5035, 16.4510
+- Trstenik plaža: 43.5090, 16.4720
+- Žnjan plaža: 43.4958, 16.4748
+- Kasjuni: 43.5060, 16.4175
+- Bene: 43.5093, 16.4233
+
+### Split – Prijevozni čvorovi
+- Autobusni kolodvor: 43.5055, 16.4396
+- Trajektna luka: 43.5050, 16.4372
+- Željeznica Split: 43.5050, 16.4393
+
+### Solin – POI
+- Antički grad Salona: 43.5390, 16.4860
+- Gospa od Otoka (crkva): 43.5415, 16.4790
+- TC Joker Solin: 43.5380, 16.4960
+
+### 7 Kaštela – POI
+- Tvrđava Kaštel Kambelovac: 43.5660, 16.3880
+- Crkva sv. Jurja – Kaštel Stari: 43.5610, 16.3545
+- Plaža Kaštel Gomilica: 43.5650, 16.3985
+- TC Brodotrogir / komercijalna zona Resnik: 43.5390, 16.3000
+
+### Trogir – POI
+- Katedrala sv. Lovre (UNESCO): 43.5167, 16.2500
+- Kaštel Kamerlengo: 43.5155, 16.2485
+- Trg Ivana Pavla II: 43.5165, 16.2498
+- Kopnena vrata: 43.5162, 16.2503
+
+## Autobusne linije Promet Split
+
+### Gradske linije (Split)
+- L1: Bunje – Poljička – HNK – Dom. rata – Bunje
+- L2: Split – Poljička – K. Sućurac (Strinje) – Zračna luka (i obratno)
+- L2A: K. Sućurac (Strinje) – Trajektna luka
+- L3: Brnik – Brda – Brnik
+- L3A: Brnik – Poljička – Brnik
+- L5: Dračevac – Poljička – HNK – Dračevac
+- L5A: Dračevac – Solin centar – Poljička – HNK
+- L6: Kila – Vukovarska – HNK – Kila
+- L7: Žnjan – Spinut – Zapadna obala (i obratno)
+- L8: Žnjan – Zvončac – Žnjan
+- L9: Ravne njive – Trajektna luka – Ravne njive
+- L10: Japirko – Bilice – Trajektna luka
+- L11: Ravne njive – Pujanke – Kampus – Spinut (i obratno)
+- L12: Sv. Frane – Bene – Sv. Frane
+- L14: Brda – Kopilica – Dubrovačka – Bolnice – Pazdigrad – Poljička – Žnjan – Duilovo
+- L15: Duilovo – Žnjan – Trajektna luka – Duilovo
+- L16: Ninčevići – Dom. rata – HNK – Ninčevići
+- L17: Spinut – Lora – Kampus – Trstenik (i obratno)
+- L18: Sirobuja – Mejaši – HNK – Mejaši – Sirobuja
+- L21: Sv. Frane – Zenta – Sv. Frane
+- L22: Klis – Split (i obratno)
+
+### Urbane linije (Split – okolica)
+- Split – K. Sućurac – Zračna luka (i obratno)
+- Split – Klis / Klis kosa (i obratno)
+- Split – Vranjic (i obratno)
+- Split – Kučine (i obratno)
+- Split – Solin – Dračevac (i obratno)
+- Split – Podstrana / Mutogras (i obratno)
+- Split – Dugopolje (i obratno)
+- Split – Koprivno (i obratno)
+- Split – Airport – Trogir (i obratno)
+- Split – K. Stari – Zračna luka (i obratno)
+- Split – Omiš – Ravnički most (i obratno)
+- Split – Sitno Gornje – Dubrava (i obratno)
+- Split – Tugare – Naklice (i obratno)
+- K. Stari – Rudine / Željeznička stanica
+- Trogir – Split (direktna)
+
+### Prigradske linije (dalje destinacije)
+- Split – Kotlenice – Dolac Donji – Dolac Gornji
+- Split – Tugare – Podgrađe – Blato – Šestanovac
+- Split – Bisko – Trilj – Grab
+- Split – Neorić – Sutina
+- Split – Muć – Ogorje / Crivac – Kljaci
+- Split – Kljaci – Drniš
+- Split – Brštanovo – Nisko
+- Split – Konjsko – Lećevica – Kladnjice
+- K. Stari – Sitno – Bogdanovići – Malačka – Divojevići
+- K. Stari – Malačka – Tešije – Đirlući – Šerići
+
+## Kompas (smjer vožnje)
+Live podaci uključuju smjer vožnje svakog vozila kao kompasni azimut (npr. "SI 47°").
+- S/SS = sjeverno (prema Solinu, Kaštelima, unutrašnjosti)
+- I/II = istočno (prema Žnjanu, Stobreču, Omišu)
+- J/JJ = južno (prema moru, trajektnoj luci)
+- Z/ZZ = zapadno (prema Trogiru)
+Koristi smjer + poziciju za procjenu dolazi li bus prema korisniku ili se udaljava.
+
+## Kako koristiti korisnikovu lokaciju i pinove
+- Ako je poznata GPS lokacija korisnika: prepoznaj kvart (usporedi s koordinatama) i predloži najbliže linije.
+- Ako je pin postavljen kao odredište: pronađi koji kvart/POI je najbliži pinu i koje linije tamo idu.
+- Kombinacija lokacija + odredišni pin: predloži konkretnu rutu (kojom linijom, gdje ukrcati, gdje iskrcati).
+- Prevedi koordinate u ime mjesta – nikad ne izgovaraj gole koordinate korisniku.
+
+## Kako odgovarati
+
+UVIJEK govori o LINIJAMA, nikad o ID-u vozila. Korisnik ne zna što je "vozilo #1042".
+
+- Linija s jednim vozilom: "Linija 7 trenutno je kod Žnjana i kreće prema centru."
+- Linija s više vozila: opiši svako po lokaciji i smjeru — "Linija 7 ima 3 aktivna autobusa:
+  jedan je kod Žnjana i ide prema centru, drugi je kod Spinuta i kreće prema Trajektnoj luci,
+  treći stoji na stajalištu kod Zapadne obale."
+- Za procjenu lokacije: usporedi lat/lng s koordinatama kvartova (razlika < 0.005° ≈ 500 m).
+  Prevedi koordinate u ime kvarta ili ulice — nikad ne izgovaraj gole koordinate korisniku.
+- Za ETA: procijeni na temelju udaljenosti i smjera vožnje (gradski bus ~20 km/h prosjek).
+- Smjer korisno tumači: npr. "kreće prema centru", "udaljava se od terminusa", "ide prema moru".
+- Vozni red: ako su dostupni polasci, navedi ih. Inače uputi na promet-split.hr/vozni-red.
+- Ne izmišljaj podatke. Ako linija nema aktivnih vozila, jasno reci.
+- Nikad ne spominji: ID vozila, broj garaže, sirove koordinate, tehničke detalje API-ja."""
+
+
+@app.post("/api/chat")
+async def chat(body: dict):
+    user_message    = body.get("message", "")
+    history         = body.get("history", [])
+    user_location   = body.get("user_location")   # {lat, lng} | None
+    pins            = body.get("pins", [])         # [{lat, lng, label}, ...]
+    reports         = body.get("reports", [])      # [{type, location, severity, summary, lat, lng}, ...]
+
+    vehicle_ctx = build_vehicle_context()
+
+    location_parts: list[str] = []
+    if user_location:
+        location_parts.append(
+            f"Korisnikova trenutna GPS lokacija: ({user_location['lat']:.5f}, {user_location['lng']:.5f})"
+        )
+    if pins:
+        pin_lines = [f"  - \"{p.get('label','Pin')}\": ({p['lat']:.5f}, {p['lng']:.5f})" for p in pins]
+        location_parts.append("Korisnikovi pinovi / odredišta:\n" + "\n".join(pin_lines))
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": f"Live podaci o vozilima:\n{vehicle_ctx}"},
+    ]
+    if reports:
+        lines = [
+            f"  - {r.get('type','?')} kod {r.get('location','?')} "
+            f"(ozbiljnost: {r.get('severity','?')}): {r.get('summary','')}"
+            for r in reports[:10]
+        ]
+        location_parts.append("Aktivni prometni incidenti (prijavljeni od korisnika):\n" + "\n".join(lines))
+
+    if location_parts:
+        messages.append({"role": "system", "content": "\n\n".join(location_parts)})
+
+    messages += [*history, {"role": "user", "content": user_message}]
+
+    response = nim_client.chat.completions.create(
+        model="meta/llama-3.1-70b-instruct",
+        messages=messages,
+        max_tokens=600,
+        temperature=0.3,
+    )
+
+    return {
+        "response": response.choices[0].message.content,
+        "vehicle_count": len(vehicles),
+    }

@@ -18,18 +18,21 @@ export function useReports() {
   const [voted, setVoted] = useState(loadVoted)
 
   const fetchReports = useCallback(async () => {
-    const since = new Date(Date.now() - EXPIRY_MINUTES * 60 * 1000).toISOString()
-    const { data, error } = await supabase
-      .from('reports')
-      .select('*')
-      .gte('created_at', since)
-      .order('created_at', { ascending: false })
-
-    if (!error && data) setReports(data)
+    if (!supabase) return
+    try {
+      const since = new Date(Date.now() - EXPIRY_MINUTES * 60 * 1000).toISOString()
+      const { data, error } = await supabase
+        .from('reports')
+        .select('*')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+      if (!error && data) setReports(data)
+    } catch { /* silent */ }
   }, [])
 
   useEffect(() => {
     fetchReports()
+    if (!supabase) return
 
     const channel = supabase
       .channel('reports-realtime')
@@ -40,31 +43,23 @@ export function useReports() {
   }, [fetchReports])
 
   const addReport = useCallback(async ({ lat, lng, type, location, severity, summary }) => {
-    const { data, error } = await supabase.from('reports').insert([
-      { lat, lng, type, location, severity, summary, votes: 1 }
-    ]).select().single()
-
+    if (!supabase) return { data: null, error: new Error('Supabase nije konfiguriran') }
+    const { data, error } = await supabase
+      .from('reports')
+      .insert([{ lat, lng, type, location, severity, summary, votes: 1 }])
+      .select()
+      .single()
     if (!error && data) setReports(prev => [data, ...prev])
     return { data, error }
   }, [])
 
   const upvoteReport = useCallback(async (id) => {
-    if (voted.has(id)) return
+    if (!supabase) return
     const report = reports.find(r => r.id === id)
     if (!report) return
-
-    const next = new Set(voted)
-    next.add(id)
-    setVoted(next)
-    saveVoted(next)
-
-    await supabase
-      .from('reports')
-      .update({ votes: report.votes + 1 })
-      .eq('id', id)
-
+    await supabase.from('reports').update({ votes: report.votes + 1 }).eq('id', id)
     setReports(prev => prev.map(r => r.id === id ? { ...r, votes: r.votes + 1 } : r))
   }, [reports, voted])
 
-  return { reports, addReport, upvoteReport, votedIds: voted, refresh: fetchReports }
+  return { reports, addReport, upvoteReport }
 }

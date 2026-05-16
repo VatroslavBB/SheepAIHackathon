@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
-import { summarizeCluster } from '../llm'
+import { summarizeTraffic } from '../llm'
 
-export default function SummaryPanel({ reports }) {
+export default function SummaryPanel({ reports, vehicles }) {
   const [summary, setSummary] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!reports.length) { setSummary(''); return }
     setLoading(true)
-    summarizeCluster(reports)
-      .then(s => setSummary(s || ''))
+    summarizeTraffic(reports, vehicles)
+      .then(s  => setSummary(s || ''))
       .catch(() => setSummary(''))
       .finally(() => setLoading(false))
   }, [reports.length])
@@ -18,26 +18,20 @@ export default function SummaryPanel({ reports }) {
 
   return (
     <div style={{
-      position: 'fixed',
-      top: 16,
-      left: '50%',
-      transform: 'translateX(-50%)',
-      background: 'white',
-      borderRadius: 12,
-      padding: '12px 18px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-      zIndex: 1000,
-      maxWidth: 'calc(100vw - 32px)',
-      width: 420,
+      position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)',
+      background: 'rgba(21,24,32,0.95)', border: '1px solid #1e2330',
+      borderRadius: 12, padding: '10px 16px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.4)', zIndex: 800,
+      maxWidth: 'calc(100% - 140px)', width: 400,
+      backdropFilter: 'blur(6px)',
     }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-        Prometna situacija · {reports.length} prijava
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 4, fontFamily: 'DM Mono, monospace', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+        Prometna situacija · {reports.length} {reports.length === 1 ? 'incident' : 'incidenta'}
       </div>
-      {loading ? (
-        <div style={{ fontSize: 14, color: '#9ca3af' }}>Analiziram...</div>
-      ) : (
-        <div style={{ fontSize: 14, color: '#111', lineHeight: 1.5 }}>{summary}</div>
-      )}
+      {loading
+        ? <div style={{ fontSize: 13, color: '#64748b' }}>Analiziram...</div>
+        : <div style={{ fontSize: 13, color: '#e2e8f0', lineHeight: 1.5 }}>{summary}</div>
+      }
     </div>
   )
 }

@@ -8,30 +8,50 @@ const client = new OpenAI({
 
 const MODEL = 'meta/llama-3.3-70b-instruct'
 
-export async function summarizeCluster(reports) {
-  if (!reports.length) return null
+export async function parseIncidentFromText(text) {
+  const res = await client.chat.completions.create({
+    model: MODEL,
+    max_tokens: 256,
+    messages: [
+      {
+        role: 'system',
+        content: `Ti si parser prometnih incidenata za Split, Hrvatska.
+Izvuci informacije iz korisničke prijave (na hrvatskom ili engleskom).
+Odgovori SAMO validnim JSON-om, bez markdowna, bez objašnjenja.
+Schema: { "type": "jam|accident|closed", "location": "naziv ulice ili kvarta", "severity": "low|medium|high", "summary": "jedna rečenica na hrvatskom" }
+Ako lokacija nije jasna, koristi "Nepoznata lokacija".`,
+      },
+      { role: 'user', content: text },
+    ],
+  })
+  return JSON.parse(res.choices[0].message.content)
+}
 
-  const list = reports
-    .map(r => `- ${r.type} at ${r.location} (${r.severity} severity)`)
+export async function summarizeTraffic(reports, vehicles = []) {
+  const incidents = reports
+    .map(r => `- ${r.type} kod ${r.location} (${r.severity})`)
     .join('\n')
 
-  const stream = await client.chat.completions.create({
+  const activeLines = [...new Set(
+    vehicles.filter(v => v.status === 1).map(v => v.line)
+  )].sort().join(', ')
+
+  const parts = []
+  if (incidents)   parts.push(`Incidenti:\n${incidents}`)
+  if (activeLines) parts.push(`Aktivne autobusne linije: ${activeLines}`)
+  if (!parts.length) return null
+
+  const res = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 150,
     stream: true,
     messages: [
       {
         role: 'system',
-        content: 'You summarize traffic conditions in Split, Croatia. Write 1-2 sentences in Croatian. Be direct and useful — mention location, severity, and estimated impact. No filler.',
+        content: 'Sažmi prometnu situaciju u Splitu u 1-2 rečenice na hrvatskom. Budi konkretan — navedi lokacije problema i koje linije voze. Bez uvoda i filler rečenica.',
       },
-      {
-        role: 'user',
-        content: `Current reports:\n${list}\n\nWrite a traffic summary.`,
-      },
+      { role: 'user', content: parts.join('\n\n') },
     ],
   })
-
-  const chunks = []
-  for await (const chunk of stream) chunks.push(chunk)
-  return chunks.map(c => c.choices[0]?.delta?.content ?? '').join('').trim()
+  return res.choices[0].message.content
 }
