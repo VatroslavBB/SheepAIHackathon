@@ -27,6 +27,8 @@ export default function App() {
   const [modalLoading,  setModalLoading]  = useState(false)
   const [validating,    setValidating]    = useState(false)
   const [locationError, setLocationError] = useState(null)
+  const [view,          setView]          = useState('map')
+  const [showSummary,   setShowSummary]   = useState(true)
 
   const handleMapClick = useCallback(async (latlng) => {
     if (pinMode) {
@@ -115,7 +117,7 @@ export default function App() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
 
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
+        <div className={`view-pane map-pane${view === 'chat' ? ' pane-hidden' : ''}`}>
           <MapView
             vehicles={vehicles}
             reports={allReports}
@@ -131,6 +133,13 @@ export default function App() {
             <button className={`map-btn ${userLocation ? 'active' : ''}`} onClick={handleLocate} title={t.toolbar.locate}>📍</button>
             <button className={`map-btn ${pinMode ? 'active' : ''}`} onClick={() => setPinMode(m => !m)} title={t.toolbar.pin}>📌</button>
             <button className="map-btn" onClick={() => { setPins([]); setUserLocation(null); setPinMode(false) }} title={t.toolbar.clear}>✕</button>
+            {allReports.length > 0 && (
+              <button
+                className={`map-btn ${showSummary ? 'active' : ''}`}
+                onClick={() => setShowSummary(s => !s)}
+                title={t.toolbar.toggleSummary}
+              >📊</button>
+            )}
           </div>
 
           {validating && (
@@ -165,7 +174,7 @@ export default function App() {
             </div>
           )}
 
-          <SummaryPanel reports={allReports} vehicles={vehicles} />
+          {showSummary && <SummaryPanel reports={allReports} vehicles={vehicles} />}
 
           {!reports.length && !pinMode && !validating && !locationError && (
             <div style={{
@@ -178,7 +187,9 @@ export default function App() {
           )}
         </div>
 
-        <ChatPanel userLocation={userLocation} pins={pins} reports={allReports} />
+        <div className={`view-pane chat-pane${view === 'map' ? ' pane-hidden' : ''}`}>
+          <ChatPanel userLocation={userLocation} pins={pins} reports={allReports} />
+        </div>
       </div>
 
       {pendingReport && (
@@ -196,6 +207,23 @@ export default function App() {
           onCancel={() => setPendingPin(null)}
         />
       )}
+
+      <nav className="bottom-nav">
+        <button
+          className={`bottom-tab${view === 'map' ? ' bottom-tab--active' : ''}`}
+          onClick={() => setView('map')}
+        >
+          <span className="bottom-tab__icon">🗺️</span>
+          <span className="bottom-tab__label">{t.tabs.map}</span>
+        </button>
+        <button
+          className={`bottom-tab${view === 'chat' ? ' bottom-tab--active' : ''}`}
+          onClick={() => setView('chat')}
+        >
+          <span className="bottom-tab__icon">💬</span>
+          <span className="bottom-tab__label">{t.tabs.chat}</span>
+        </button>
+      </nav>
     </div>
   )
 }

@@ -9,6 +9,7 @@ export const T = {
     },
     toolbar: {
       locate: 'Moja lokacija', pin: 'Dodaj navigacijski pin', clear: 'Obriši pinove i lokaciju',
+      toggleSummary: 'Prometna situacija',
     },
     hints: {
       pinMode: 'Klikni na kartu za dodavanje pina',
@@ -60,7 +61,8 @@ export const T = {
         { label: 'Statistika', text: 'Koliko autobusa je aktivno i koje linije voze?' },
       ],
     },
-    pin: { prompt: 'Naziv pina', placeholder: 'npr. Dom, Posao...', cancel: 'Odustani', confirm: 'Dodaj' },
+    pin:  { prompt: 'Naziv pina', placeholder: 'npr. Dom, Posao...', cancel: 'Odustani', confirm: 'Dodaj' },
+    tabs: { map: 'Karta', chat: 'Chat' },
   },
 
   en: {
@@ -71,6 +73,7 @@ export const T = {
     },
     toolbar: {
       locate: 'My location', pin: 'Add navigation pin', clear: 'Clear pins & location',
+      toggleSummary: 'Traffic situation',
     },
     hints: {
       pinMode: 'Click on the map to add a pin',
@@ -122,7 +125,8 @@ export const T = {
         { label: 'Stats',     text: 'How many buses are active and which lines are running?' },
       ],
     },
-    pin: { prompt: 'Pin name', placeholder: 'e.g. Home, Work...', cancel: 'Cancel', confirm: 'Add' },
+    pin:  { prompt: 'Pin name', placeholder: 'e.g. Home, Work...', cancel: 'Cancel', confirm: 'Add' },
+    tabs: { map: 'Map', chat: 'Chat' },
   },
 }
 
