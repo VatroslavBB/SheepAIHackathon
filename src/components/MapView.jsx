@@ -109,7 +109,7 @@ function BusMarker({ vehicle: v }) {
   )
 }
 
-function IncidentMarker({ report: r, onUpvote }) {
+function IncidentMarker({ report: r, onUpvote, votedIds }) {
   const { t } = useLang()
   const icon = useMemo(() => makeIncidentIcon(r.type, r.auto), [r.type, r.auto])
   const label = r.auto ? t.map.works : (t.map.incident[r.type] || r.type)
@@ -127,11 +127,22 @@ function IncidentMarker({ report: r, onUpvote }) {
           {t.map.severity}: {t.map.sev[r.severity] || r.severity}
           {!r.auto && <> · {r.votes} {t.map.confirmations}</>}
           {!r.auto && (
-            <><br />
-            <button
-              onClick={() => onUpvote(r.id)}
-              style={{ marginTop: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}
-            >{t.map.confirm}</button></>
+            <><br />{(() => {
+              const done = votedIds?.has(r.id)
+              return (
+                <button
+                  onClick={() => !done && onUpvote(r.id)}
+                  disabled={done}
+                  style={{
+                    marginTop: 8, border: 'none', borderRadius: 6,
+                    padding: '4px 12px', fontSize: 12, cursor: done ? 'default' : 'pointer',
+                    background: done ? '#475569' : '#2563eb', color: '#fff',
+                  }}
+                >
+                  {done ? '✓' : t.map.confirm}
+                </button>
+              )
+            })()}</>
           )}
         </div>
       </Popup>
@@ -159,7 +170,7 @@ function BikeMarker({ station: s }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function MapView({ vehicles, reports, bikes, userLocation, pins, onMapClick, onUpvote }) {
+export default function MapView({ vehicles, reports, bikes, userLocation, pins, onMapClick, onUpvote, votedIds }) {
   return (
     <MapContainer
       center={[43.508, 16.440]}
@@ -188,7 +199,7 @@ export default function MapView({ vehicles, reports, bikes, userLocation, pins, 
         {bikes.map(s => <BikeMarker key={s.uid} station={s} />)}
       </MarkerClusterGroup>
 
-      {reports.map(r => <IncidentMarker key={r.id} report={r} onUpvote={onUpvote} />)}
+      {reports.map(r => <IncidentMarker key={r.id} report={r} onUpvote={onUpvote} votedIds={votedIds} />)}
 
       {userLocation && (
         <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocIcon}>

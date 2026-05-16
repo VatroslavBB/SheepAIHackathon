@@ -14,7 +14,7 @@ import { useLang }          from './LangContext'
 export default function App() {
   const { lang, setLang, t } = useLang()
   const { vehicles, online } = useVehicles()
-  const { reports, addReport, upvoteReport } = useReports()
+  const { reports, addReport, upvoteReport, votedIds } = useReports()
   const { stations: bikes } = useBikes()
   const autoReports = useRoadData()
   const allReports = useMemo(() => [...reports, ...autoReports], [reports, autoReports])
@@ -124,6 +124,7 @@ export default function App() {
             pins={pins}
             onMapClick={handleMapClick}
             onUpvote={upvoteReport}
+            votedIds={votedIds}
           />
 
           <div className="map-toolbar">
