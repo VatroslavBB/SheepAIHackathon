@@ -1,13 +1,16 @@
 import OpenAI from 'openai'
 
 const client = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  apiKey: import.meta.env.VITE_NVIDIA_API_KEY,
+  baseURL: 'https://integrate.api.nvidia.com/v1',
   dangerouslyAllowBrowser: true,
 })
 
+const MODEL = 'meta/llama-3.3-70b-instruct'
+
 export async function parseIncidentFromText(text) {
   const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: MODEL,
     max_tokens: 256,
     messages: [
       {
@@ -33,7 +36,7 @@ export async function summarizeCluster(reports) {
     .join('\n')
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: MODEL,
     max_tokens: 150,
     messages: [
       {
