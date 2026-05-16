@@ -1,4 +1,4 @@
-const OVERPASS = 'https://overpass-api.de/api/interpreter'
+import { API_BASE } from './api'
 
 const INVALID_NATURAL  = new Set(['sea', 'bay', 'water', 'wetland', 'wood',
                                    'scrub', 'heath', 'grassland', 'cliff', 'beach', 'sand'])
@@ -14,10 +14,10 @@ const TYPE_LABEL = {
 }
 
 function post(query) {
-  return fetch(OVERPASS, {
+  return fetch(`${API_BASE}/api/overpass`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
   }).then(r => r.json())
 }
 

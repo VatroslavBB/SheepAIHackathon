@@ -38,7 +38,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
           message:       userText,
           history:       nextHistory.slice(-12),
           user_location: userLocation,
-          pins:          pins.map(p => ({ lat: p.lat, lng: p.lng, label: p.label })),
+          pins:          (pins ?? []).map(p => ({ lat: p.lat, lng: p.lng, label: p.label })),
           reports:       reports.slice(0, 10).map(({ type, location, severity, summary, lat, lng }) =>
                            ({ type, location, severity, summary, lat, lng })),
         }),

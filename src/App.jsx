@@ -48,7 +48,7 @@ export default function App() {
     }
 
     setPendingReport(latlng)
-  }, [pinMode])
+  }, [pinMode, t])
 
   const handleReportConfirm = useCallback(async (data) => {
     setModalLoading(true)
@@ -81,27 +81,18 @@ export default function App() {
         <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 13, color: '#22d3ee', letterSpacing: '0.08em' }}>
           {t.header.title}
         </span>
-
         <div style={{ display: 'flex', gap: 16, fontSize: 11, fontFamily: 'DM Mono, monospace', color: '#64748b' }}>
           <span>{t.header.vehicles} <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{vehicles.length}</span></span>
           <span>{t.header.lines} <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{lineCount}</span></span>
-          {reports.length > 0 && (
-            <span>{t.header.incidents} <span style={{ color: '#fbbf24', fontWeight: 500 }}>{reports.length}</span></span>
-          )}
-          {autoReports.length > 0 && (
-            <span>{t.header.works} <span style={{ color: '#f97316', fontWeight: 500 }}>{autoReports.length}</span></span>
-          )}
+          {reports.length > 0 && <span>{t.header.incidents} <span style={{ color: '#fbbf24', fontWeight: 500 }}>{reports.length}</span></span>}
+          {autoReports.length > 0 && <span>{t.header.works} <span style={{ color: '#f97316', fontWeight: 500 }}>{autoReports.length}</span></span>}
         </div>
-
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, fontFamily: 'DM Mono, monospace', color: '#64748b' }}>
-          <button
-            onClick={() => setLang(lang === 'hr' ? 'en' : 'hr')}
-            style={{
-              background: 'none', border: '1px solid #334155', borderRadius: 6,
-              color: '#94a3b8', fontSize: 11, fontFamily: 'DM Mono, monospace',
-              padding: '2px 8px', cursor: 'pointer', letterSpacing: '0.06em',
-            }}
-          >
+          <button onClick={() => setLang(lang === 'hr' ? 'en' : 'hr')} style={{
+            background: 'none', border: '1px solid #334155', borderRadius: 6,
+            color: '#94a3b8', fontSize: 11, fontFamily: 'DM Mono, monospace',
+            padding: '2px 8px', cursor: 'pointer', letterSpacing: '0.06em',
+          }}>
             {lang === 'hr' ? 'EN' : 'HR'}
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -134,11 +125,7 @@ export default function App() {
             <button className={`map-btn ${pinMode ? 'active' : ''}`} onClick={() => setPinMode(m => !m)} title={t.toolbar.pin}>📌</button>
             <button className="map-btn" onClick={() => { setPins([]); setUserLocation(null); setPinMode(false) }} title={t.toolbar.clear}>✕</button>
             {allReports.length > 0 && (
-              <button
-                className={`map-btn ${showSummary ? 'active' : ''}`}
-                onClick={() => setShowSummary(s => !s)}
-                title={t.toolbar.toggleSummary}
-              >📊</button>
+              <button className={`map-btn ${showSummary ? 'active' : ''}`} onClick={() => setShowSummary(s => !s)} title={t.toolbar.toggleSummary}>📊</button>
             )}
           </div>
 
@@ -147,9 +134,7 @@ export default function App() {
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(21,24,32,0.92)', color: '#e2e8f0', borderRadius: 20,
               padding: '7px 18px', fontSize: 12, zIndex: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
-            }}>
-              {t.hints.validating}
-            </div>
+            }}>{t.hints.validating}</div>
           )}
 
           {locationError && (
@@ -159,32 +144,26 @@ export default function App() {
               padding: '8px 20px', fontSize: 13, fontWeight: 600,
               zIndex: 900, whiteSpace: 'nowrap', pointerEvents: 'none',
               boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-            }}>
-              ⚠️ {locationError}
-            </div>
+            }}>⚠️ {locationError}</div>
           )}
 
-          {pinMode && (
+          {pinMode && !validating && !locationError && (
             <div style={{
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(124,58,237,0.9)', color: '#fff', borderRadius: 20,
               padding: '6px 16px', fontSize: 13, zIndex: 800, pointerEvents: 'none', whiteSpace: 'nowrap',
-            }}>
-              {t.hints.pinMode}
-            </div>
+            }}>{t.hints.pinMode}</div>
           )}
-
-          {showSummary && <SummaryPanel reports={allReports} vehicles={vehicles} />}
 
           {!reports.length && !pinMode && !validating && !locationError && (
             <div style={{
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(0,0,0,0.65)', color: '#e2e8f0', borderRadius: 20,
               padding: '7px 18px', fontSize: 12, zIndex: 800, whiteSpace: 'nowrap', pointerEvents: 'none',
-            }}>
-              {t.hints.clickToReport}
-            </div>
+            }}>{t.hints.clickToReport}</div>
           )}
+
+          {showSummary && <SummaryPanel reports={allReports} vehicles={vehicles} />}
         </div>
 
         <div className={`view-pane chat-pane${view === 'map' ? ' pane-hidden' : ''}`}>
@@ -209,17 +188,11 @@ export default function App() {
       )}
 
       <nav className="bottom-nav">
-        <button
-          className={`bottom-tab${view === 'map' ? ' bottom-tab--active' : ''}`}
-          onClick={() => setView('map')}
-        >
+        <button className={`bottom-tab${view === 'map' ? ' bottom-tab--active' : ''}`} onClick={() => setView('map')}>
           <span className="bottom-tab__icon">🗺️</span>
           <span className="bottom-tab__label">{t.tabs.map}</span>
         </button>
-        <button
-          className={`bottom-tab${view === 'chat' ? ' bottom-tab--active' : ''}`}
-          onClick={() => setView('chat')}
-        >
+        <button className={`bottom-tab${view === 'chat' ? ' bottom-tab--active' : ''}`} onClick={() => setView('chat')}>
           <span className="bottom-tab__icon">💬</span>
           <span className="bottom-tab__label">{t.tabs.chat}</span>
         </button>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from './api'
 
 // Split bounding box: south, west, north, east
 const BBOX = '43.45,16.35,43.57,16.55'
@@ -44,10 +45,10 @@ export function useRoadData() {
     let cancelled = false
 
     function fetchData() {
-      fetch('https://overpass-api.de/api/interpreter', {
+      fetch(`${API_BASE}/api/overpass`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(QUERY)}`,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: QUERY }),
       })
         .then(r => r.json())
         .then(data => {

@@ -8,7 +8,9 @@ export const T = {
       driving: 'u vožnji', offline: 'offline',
     },
     toolbar: {
-      locate: 'Moja lokacija', pin: 'Dodaj navigacijski pin', clear: 'Obriši pinove i lokaciju',
+      locate: 'Moja lokacija',
+      pin: 'Dodaj navigacijski pin',
+      clear: 'Obriši pinove i lokaciju',
       toggleSummary: 'Prometna situacija',
     },
     hints: {
@@ -72,7 +74,9 @@ export const T = {
       driving: 'in service', offline: 'offline',
     },
     toolbar: {
-      locate: 'My location', pin: 'Add navigation pin', clear: 'Clear pins & location',
+      locate: 'My location',
+      pin: 'Add navigation pin',
+      clear: 'Clear pins & location',
       toggleSummary: 'Traffic situation',
     },
     hints: {
