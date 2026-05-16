@@ -1,41 +1,62 @@
 import { useState, useEffect } from 'react'
 import { API_BASE } from './api'
 
-// Split bounding box: south, west, north, east
-const BBOX = '43.45,16.35,43.57,16.55'
-
 const QUERY = `[out:json][timeout:25];
 (
-  way["highway"="construction"](${BBOX});
-  node["highway"="construction"](${BBOX});
-  way["construction"~"."](${BBOX});
-  node["construction"~"."](${BBOX});
-  way["highway"="road"](${BBOX});
-  way["access"="no"]["highway"](${BBOX});
-  node["barrier"="block"]["highway"](${BBOX});
+  way["highway"="construction"](43.45,16.35,43.57,16.55);
+  node["highway"="construction"](43.45,16.35,43.57,16.55);
+  way["construction"~"."](43.45,16.35,43.57,16.55);
+  node["construction"~"."](43.45,16.35,43.57,16.55);
+  way["access"="no"]["highway"](43.45,16.35,43.57,16.55);
+  node["barrier"="block"]["highway"](43.45,16.35,43.57,16.55);
 );
 out center tags;`
+
+// Vite proxy prvi (nema CORS), zatim direktni URL-ovi kao fallback
+const INSTANCES = [
+  '/overpass/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+]
 
 function toReport(el) {
   const lat = el.lat ?? el.center?.lat
   const lng = el.lon ?? el.center?.lon
   if (!lat || !lng) return null
 
-  const tags = el.tags || {}
+  const tags     = el.tags || {}
   const isAccess = tags.access === 'no'
-  const isBlock = tags.barrier === 'block'
+  const isBlock  = tags.barrier === 'block'
 
   return {
-    id: `osm-${el.id}`,
+    id:       `osm-${el.id}`,
     lat,
     lng,
-    type: 'closed',
+    type:     'closed',
     severity: isAccess || isBlock ? 'high' : 'medium',
-    location: tags.name || tags['addr:street'] || tags.description || 'Radovi na cesti',
-    summary: tags.note || tags.description || 'Radovi — OpenStreetMap',
-    votes: 0,
-    auto: true,
+    location: tags.name || tags['addr:street'] || '',
+    summary:  tags.note || tags.description || 'Radovi ili ograničenje — OpenStreetMap',
+    votes:    0,
+    auto:     true,
   }
+}
+
+async function fetchOverpass() {
+  const body = `data=${encodeURIComponent(QUERY)}`
+  for (const url of INSTANCES) {
+    try {
+      const r = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      })
+      if (!r.ok) continue
+      const data = await r.json()
+      return (data.elements || []).map(toReport).filter(Boolean)
+    } catch { continue }
+  }
+  return []
 }
 
 export function useRoadData() {
@@ -44,6 +65,9 @@ export function useRoadData() {
   useEffect(() => {
     let cancelled = false
 
+    async function load() {
+      const reports = await fetchOverpass()
+      if (!cancelled) setAutoReports(reports)
     function fetchData() {
       fetch(`${API_BASE}/api/overpass`, {
         method: 'POST',
@@ -59,9 +83,9 @@ export function useRoadData() {
         .catch(() => {})
     }
 
-    fetchData()
-    const interval = setInterval(fetchData, 10 * 60 * 1000) // refresh every 10 min
-    return () => { cancelled = true; clearInterval(interval) }
+    load()
+    const id = setInterval(load, 10 * 60 * 1000)
+    return () => { cancelled = true; clearInterval(id) }
   }, [])
 
   return autoReports

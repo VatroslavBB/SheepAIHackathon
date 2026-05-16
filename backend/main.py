@@ -8,6 +8,8 @@ import tempfile
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+
+load_dotenv()  # učita backend/.env automatski
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -88,13 +90,115 @@ def nearest_bike_stations(lat: float, lng: float, n: int = 1) -> list:
     return sorted(active, key=lambda s: haversine_km(lat, lng, s["lat"], s["lng"]))[:n]
 
 
-def build_transport_context(ulat: float, ulng: float, dlat: float, dlng: float) -> str:
-    dist = haversine_km(ulat, ulng, dlat, dlng)
-    lines = [f"Udaljenost polazište → odredište: {dist:.1f} km", ""]
+AREAS = [
+    ("Trajektna luka",      43.5050, 16.4372),
+    ("Riva / Centar",       43.5073, 16.4402),
+    ("Pjaca / HNK",         43.5081, 16.4402),
+    ("Zapadna obala",       43.5078, 16.4296),
+    ("Spinut",              43.5155, 16.4370),
+    ("Lora",                43.5095, 16.4265),
+    ("Bene",                43.5093, 16.4233),
+    ("Zenta",               43.5055, 16.4400),
+    ("Gripe / Bolnice",     43.5090, 16.4530),
+    ("Zvončac",             43.5048, 16.4345),
+    ("Mejaši",              43.5185, 16.4430),
+    ("Sirobuja",            43.5265, 16.4355),
+    ("Kila",                43.5295, 16.4355),
+    ("Brda",                43.5310, 16.4460),
+    ("Brnik",               43.5250, 16.4530),
+    ("Kopilica",            43.5150, 16.4570),
+    ("Pazdigrad",           43.5145, 16.4650),
+    ("Kampus / FESB",       43.5130, 16.4655),
+    ("Pujanke",             43.5175, 16.4690),
+    ("Ravne njive",         43.5200, 16.4665),
+    ("Trstenik",            43.5110, 16.4715),
+    ("Duilovo",             43.4995, 16.4835),
+    ("Žnjan",               43.4958, 16.4748),
+    ("Stobreč",             43.4910, 16.4895),
+    ("Žrnovnica",           43.5005, 16.5155),
+    ("Solin centar",        43.5395, 16.4805),
+    ("Vranjic",             43.5295, 16.4750),
+    ("Mravince",            43.5465, 16.4755),
+    ("Klis",                43.5527, 16.5330),
+    ("K. Sućurac",          43.5640, 16.4195),
+    ("K. Gomilica",         43.5655, 16.3985),
+    ("K. Kambelovac",       43.5660, 16.3880),
+    ("K. Lukšić",           43.5645, 16.3740),
+    ("K. Stari",            43.5610, 16.3545),
+    ("K. Novi",             43.5555, 16.3385),
+    ("K. Štafilić",         43.5505, 16.3245),
+    ("Trogir",              43.5165, 16.2498),
+    ("Podstrana",           43.4845, 16.5225),
+    ("Dubrovačka",          43.5210, 16.4505),
+]
+
+
+def coords_to_area(lat: float, lng: float) -> str:
+    """Vrati ime najbližeg kvarta za GPS koordinate."""
+    best, best_d = "Split", float("inf")
+    for name, alat, alng in AREAS:
+        d = math.hypot(lat - alat, lng - alng)
+        if d < best_d:
+            best_d, best = d, name
+    return best
+
+
+def incident_delay_min(reports: list, route_lat: float, route_lng: float,
+                       dest_lat: float, dest_lng: float) -> tuple[int, list[str]]:
+    """Vrati ukupno kašnjenje u minutama i listu upozorenja za incidente uz rutu."""
+    SEVERITY_DELAY = {"low": 5, "medium": 10, "high": 20}
+    TYPE_FACTOR    = {"jam": 1.0, "accident": 1.2, "closed": 1.5}
+    total_delay    = 0
+    warnings: list[str] = []
+
+    for r in reports:
+        rlat, rlng = r.get("lat"), r.get("lng")
+        if rlat is None or rlng is None:
+            continue
+        # Provjeri je li incident unutar ~1 km od rute (jednostavna aproksimacija)
+        d_from_start = haversine_km(route_lat, route_lng, rlat, rlng)
+        d_from_dest  = haversine_km(dest_lat, dest_lng, rlat, rlng)
+        route_len    = haversine_km(route_lat, route_lng, dest_lat, dest_lng)
+        on_route     = (d_from_start + d_from_dest) < route_len * 1.3 + 1.0
+
+        if on_route:
+            sev     = r.get("severity", "low")
+            typ     = r.get("type", "jam")
+            delay   = round(SEVERITY_DELAY.get(sev, 5) * TYPE_FACTOR.get(typ, 1.0))
+            total_delay += delay
+            loc     = (r.get("location") or "").strip()
+            summary = (r.get("summary") or "").strip()
+            emoji   = "🚧" if typ == "closed" else "🚨" if typ == "accident" else "🚗"
+            typ_hr  = {"jam": "Gužva", "accident": "Nesreća", "closed": "Zatvoreno"}.get(typ, typ)
+            sev_hr  = {"low": "mala", "medium": "srednja", "high": "visoka"}.get(sev, sev)
+            # Koristi summary ako lokacija je generična (kratka ili opisna bez mjesta)
+            generic = {"radovi na cesti", "cesta", "nepoznata lokacija", "nepoznato", ""}
+            opis    = summary if (not loc or loc.lower() in generic or len(loc) < 4) else loc
+            warnings.append(f"{emoji} {typ_hr} ({sev_hr}): {opis} — +{delay} min za auto/taxi")
+
+    return total_delay, warnings
+
+
+def build_transport_context(ulat: float, ulng: float, dlat: float, dlng: float,
+                            reports: list | None = None) -> str:
+    reports = reports or []
+    dist    = haversine_km(ulat, ulng, dlat, dlng)
+    lines   = [f"Udaljenost polazište → odredište: {dist:.1f} km", ""]
+
+    # Incident kašnjenje za auto/taxi rutu
+    delay_min, incident_warnings = incident_delay_min(reports, ulat, ulng, dlat, dlng)
+    if incident_warnings:
+        lines.append("⚠️ Aktivni incidenti uz rutu:")
+        lines.extend(f"  {w}" for w in incident_warnings)
+        lines.append("")
 
     # Bus
     bus_min = max(5, round(dist / 0.333 + 4))
-    lines.append(f"🚌 Autobus: ~{bus_min} min | 1.30 EUR (gotovina) / 0.66 EUR (kartica)")
+    # Bus je manje pogođen prometnim gužvama (ima vlastite rute, stajališta)
+    bus_delay = round(delay_min * 0.4)
+    bus_total = bus_min + bus_delay
+    bus_note  = f" (uključuje ~{bus_delay} min zbog incidenata)" if bus_delay else ""
+    lines.append(f"🚌 Autobus: ~{bus_total} min{bus_note} | 1.30 EUR (gotovina) / 0.66 EUR (kartica)")
 
     # Nextbike
     ns_user = nearest_bike_stations(ulat, ulng, 1)
@@ -120,18 +224,19 @@ def build_transport_context(ulat: float, ulng: float, dlat: float, dlng: float) 
     else:
         lines.append("🚲 Nextbike: nema dostupnih bicikala u blizini")
 
-    # Uber / Taxi — gradska vožnja ~25 km/h, autocesta ~70 km/h
-    # Za kratke gradske rute koristimo 25 km/h, dodajemo 3 min za čekanje Ubera
-    car_kmh  = 25 if dist < 10 else 50
+    # Uber / Taxi — uključuje incident kašnjenje za auto rutu
+    car_kmh   = 25 if dist < 10 else 50
     drive_min = max(3, round(dist / car_kmh * 60))
-    uber_wait = 3   # prosječno čekanje Ubera u Splitu
-    uber_min  = drive_min + uber_wait
+    drive_delayed = drive_min + delay_min
+    uber_wait = 3
+    uber_min  = drive_delayed + uber_wait
     uber_eur  = 2.50 + dist * 0.45
-    lines.append(f"🚗 Uber: ~{uber_min} min (vožnja ~{drive_min} min + ~{uber_wait} min čekanje) | ~{uber_eur:.1f}–{uber_eur+1.5:.1f} EUR")
+    car_note  = f" (od toga ~{delay_min} min zbog incidenata)" if delay_min else ""
+    lines.append(f"🚗 Uber: ~{uber_min} min{car_note} (vožnja ~{drive_delayed} min + ~{uber_wait} min čekanje) | ~{uber_eur:.1f}–{uber_eur+1.5:.1f} EUR")
 
     cammeo_eur = 1.80 + dist * 0.60
     radio_eur  = 2.00 + dist * 0.55
-    lines.append(f"🚕 Taxi: ~{drive_min} min vožnje | Cammeo ~{cammeo_eur:.1f} EUR | Radio taxi ~{radio_eur:.1f} EUR")
+    lines.append(f"🚕 Taxi: ~{drive_delayed} min vožnje{car_note} | Cammeo ~{cammeo_eur:.1f} EUR | Radio taxi ~{radio_eur:.1f} EUR")
 
     return "\n".join(lines)
 
@@ -362,6 +467,38 @@ def get_bikes():
     return bike_stations
 
 
+OVERPASS_QUERY = """[out:json][timeout:25];
+(
+  way["highway"="construction"](43.45,16.35,43.57,16.55);
+  node["highway"="construction"](43.45,16.35,43.57,16.55);
+  way["construction"~"."](43.45,16.35,43.57,16.55);
+  node["construction"~"."](43.45,16.35,43.57,16.55);
+  way["access"="no"]["highway"](43.45,16.35,43.57,16.55);
+  node["barrier"="block"]["highway"](43.45,16.35,43.57,16.55);
+);
+out center tags;"""
+
+
+OVERPASS_INSTANCES = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
+
+
+@app.get("/api/roaddata")
+async def get_roaddata():
+    async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "SplitPrometAgent/1.0"}) as client:
+        for url in OVERPASS_INSTANCES:
+            try:
+                r = await client.post(url, data={"data": OVERPASS_QUERY})
+                r.raise_for_status()
+                return r.json()
+            except Exception:
+                continue
+    return {"elements": []}
+
+
 @app.get("/api/schedule/{line}")
 def get_schedule(line: str):
     times = schedule_by_line.get(line.upper(), [])
@@ -422,13 +559,14 @@ def build_vehicle_context() -> str:
         parts.append(f"Linija {line_name} [{counts}]{sched_str}:")
 
         for v in active:
-            compass  = v.get("compass")
-            heading  = v.get("heading")
-            dir_str  = f" → {compass} ({heading:.0f}°)" if compass and heading is not None else ""
-            parts.append(f"  #{v['id']}: ({v['lat']:.4f}, {v['lng']:.4f}){dir_str}")
+            compass = v.get("compass")
+            dir_str = f" smjer {compass}" if compass else ""
+            kvart   = coords_to_area(v["lat"], v["lng"])
+            parts.append(f"  vozilo u vožnji: {kvart}{dir_str}")
 
         for v in stopped:
-            parts.append(f"  #{v['id']}: ({v['lat']:.4f}, {v['lng']:.4f}) [stajalište]")
+            kvart = coords_to_area(v["lat"], v["lng"])
+            parts.append(f"  vozilo na stajalištu: {kvart}")
 
     return "\n".join(parts)
 
@@ -700,7 +838,8 @@ UVIJEK govori o LINIJAMA, nikad o ID-u vozila. Korisnik ne zna što je "vozilo #
 - Za ETA: procijeni na temelju udaljenosti i smjera (gradski bus ~20 km/h).
 - Vozni red: ako su dostupni polasci, navedi ih. Inače uputi na promet-split.hr/vozni-red.
 - Ne izmišljaj podatke. Ako linija nema aktivnih vozila, jasno reci.
-- Nikad ne spominji: ID vozila, broj garaže, sirove koordinate, tehničke detalje API-ja.
+- ZABRANJENO: ID vozila, broj garaže, lat/lng koordinate, tehničke detalje API-ja.
+- Lokaciju vozila UVIJEK pretvori u ime kvarta (npr. "Žnjan", "Kampus", "Trstenik") — kontekst ti daje naziv kvarta za svako vozilo.
 
 ## Kad korisnik pita "kako doći" ili "prijevoz"
 
@@ -720,7 +859,36 @@ Ako nema podataka o lokaciji korisnika, svejedno objasni koje linije postoje i n
 Kad korisnik pita za bicikl, **UVIJEK preporuči Nextbike** — to je javni sustav dijeljenja bicikala u Splitu.
 Nikad ne pretpostavljaj da korisnik ima vlastiti bicikl — predloži Nextbike kao rješenje.
 Real-time podaci o stanicama su dostupni u kontekstu (lokacija, broj bicikala, e-bicikli).
-Ako nema dostupnih bicikala na bližnjoj stanici, navedi sljedeću najbližu stanicu."""
+Ako nema dostupnih bicikala na bližnjoj stanici, navedi sljedeću najbližu stanicu.
+
+## Incidenti i radovi — ODMAH obavijesti korisnika
+
+Ako postoje aktivni incidenti u kontekstu, **PRVA stvar koju napišeš** u odgovoru o ruti mora biti upozorenje o njima — prije ikakvih opcija prijevoza.
+
+Format upozorenja na početku odgovora:
+⚠️ Upozorenje: [tip incidenta] kod [lokacija] ([ozbiljnost]) — [kratki utjecaj na promet]
+
+Primjer:
+⚠️ Upozorenje: Gužva na Solinskoj cesti (visoka) — značajno kašnjenje za automobile i taksije.
+⚠️ Upozorenje: Radovi na Splitskoj ulici — cesta djelomično zatvorena, obilaznica aktivna.
+
+Nakon upozorenja, nastavi s opcijama prijevoza uzimajući incidente u obzir.
+
+Aktivni incidenti dostupni su u kontekstu. UVIJEK ih uzmi u obzir pri preporuci rute, za SVAKI način prijevoza:
+
+### Tipovi incidenata i utjecaj:
+- **jam (gužva)**: povećava vrijeme vožnje autom/taksijem/uberom — dodaj 5–15 min ovisno o ozbiljnosti (low +5, medium +10, high +15). Autobus i bicikl manje pogođeni ako ima alternativne rute.
+- **accident (nesreća)**: slično kao gužva, ali može potpuno blokirati rutu — preporuči alternativni prijevoz (bus ili bicikl ako auto ne može proći).
+- **closed (zatvoreno/radovi)**: cesta zatvorena — auto/taxi/uber moraju obilaziti (dodaj 5–20 min), autobusna linija možda promijenila rutu, bicikl često može proći alternativnom rutom.
+
+### Kako primijeniti:
+1. Provjeri jesu li incidenti na ili blizu rute između polazišta i odredišta (usporedi lokacije incidenata s koordinatama rute).
+2. Za svaki način prijevoza navedi je li pogođen i kako:
+   - ✅ nije pogođen — normalno
+   - ⚠️ usporenje — napiši koliko min dodati
+   - 🚫 blokiran — preporuči alternativu
+3. Ako je auto blokiran ili jako usporen, istakni autobus ili bicikl kao bolju opciju.
+4. Uvijek zaključi s **preporukom najboljeg prijevoza** uz obrazloženje uzimajući u obzir incidente."""
 
 
 # ── Train schedule ────────────────────────────────────────────────────────────
@@ -875,6 +1043,7 @@ async def chat(body: dict):
         transport_ctx = build_transport_context(
             user_location["lat"], user_location["lng"],
             dest["lat"], dest["lng"],
+            reports,
         )
         location_parts.append(f"Procjena prijevoznih opcija:\n{transport_ctx}")
 

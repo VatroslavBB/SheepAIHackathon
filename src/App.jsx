@@ -12,6 +12,14 @@ import { validateLocation } from './validateLocation'
 import { useLang }          from './LangContext'
 
 export default function App() {
+  const { vehicles, online }                 = useVehicles()
+  const { reports, addReport, upvoteReport } = useReports()
+  const { stations: bikes }                  = useBikes()
+  const autoReports                          = useRoadData()
+  const allReports = useMemo(
+    () => [...reports, ...autoReports],
+    [reports, autoReports]
+  )
   const { lang, setLang, t } = useLang()
   const { vehicles, online } = useVehicles()
   const { reports, addReport, upvoteReport, votedIds } = useReports()
@@ -137,6 +145,9 @@ export default function App() {
             }}>{t.hints.validating}</div>
           )}
 
+          <SummaryPanel reports={allReports} vehicles={vehicles} />
+
+          {!allReports.length && !pinMode && (
           {locationError && (
             <div style={{
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
