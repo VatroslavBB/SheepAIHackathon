@@ -10,20 +10,22 @@ import { useBikes }    from './useBikes'
 import { useRoadData } from './useRoadData'
 
 export default function App() {
-  const { vehicles, online } = useVehicles()
+  const { vehicles, online }                 = useVehicles()
   const { reports, addReport, upvoteReport } = useReports()
-  const { stations: bikes } = useBikes()
-  const autoReports = useRoadData()
-  const allReports = useMemo(() => [...reports, ...autoReports], [reports, autoReports])
+  const { stations: bikes }                  = useBikes()
+  const autoReports                          = useRoadData()
+  const allReports = useMemo(
+    () => [...reports, ...autoReports],
+    [reports, autoReports]
+  )
 
-  const [pins,         setPins]         = useState([])
-  const [pinMode,      setPinMode]      = useState(false)
-  const [userLocation, setUserLocation] = useState(null)
-  const [pendingPin,   setPendingPin]   = useState(null)
+  const [pins,          setPins]          = useState([])
+  const [pinMode,       setPinMode]       = useState(false)
+  const [userLocation,  setUserLocation]  = useState(null)
+  const [pendingPin,    setPendingPin]    = useState(null)
   const [pendingReport, setPendingReport] = useState(null)
   const [modalLoading,  setModalLoading]  = useState(false)
 
-  // Map click: pin mode → pin, else → incident report
   const handleMapClick = useCallback((latlng) => {
     if (pinMode) {
       setPendingPin(latlng)
@@ -91,9 +93,8 @@ export default function App() {
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
           <MapView
             vehicles={vehicles}
-            reports={reports}
-            bikes={bikes}
             reports={allReports}
+            bikes={bikes}
             userLocation={userLocation}
             pins={pins}
             onMapClick={handleMapClick}
@@ -128,13 +129,9 @@ export default function App() {
             </div>
           )}
 
-          {/* AI traffic summary */}
-          <SummaryPanel reports={reports} vehicles={vehicles} />
-
-          {/* Intro hint */}
           <SummaryPanel reports={allReports} vehicles={vehicles} />
 
-          {!reports.length && !pinMode && (
+          {!allReports.length && !pinMode && (
             <div style={{
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(0,0,0,0.65)', color: '#e2e8f0', borderRadius: 20,
