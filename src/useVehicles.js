@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { backendWsUrl } from './api'
 
-const WS_URL = `ws://${window.location.hostname}:8000/ws/vehicles`
+const WS_URL = backendWsUrl('/ws/vehicles')
 
 export function useVehicles() {
   const [vehicles, setVehicles] = useState([])
@@ -22,12 +23,9 @@ export function useVehicles() {
 
       ws.onmessage = ({ data }) => {
         const msg = JSON.parse(data)
-
         if (msg.type === 'full') {
-          // Inicijalno stanje ili 30s sync — zamijeni sve
           setVehicles(msg.data)
         } else if (msg.type === 'update') {
-          // Pojedinačno vozilo se pomaknulo — ažuriraj samo njega
           setVehicles(prev => {
             const idx = prev.findIndex(v => v.id === msg.data.id)
             if (idx === -1) return [...prev, msg.data]
@@ -38,11 +36,7 @@ export function useVehicles() {
         }
       }
 
-      ws.onclose = () => {
-        setOnline(false)
-        scheduleRetry()
-      }
-
+      ws.onclose = () => { setOnline(false); scheduleRetry() }
       ws.onerror = () => ws.close()
     }
 
@@ -51,10 +45,7 @@ export function useVehicles() {
     }
 
     connect()
-    return () => {
-      clearTimeout(retryTimer)
-      ws?.close()
-    }
+    return () => { clearTimeout(retryTimer); ws?.close() }
   }, [])
 
   return { vehicles, online }

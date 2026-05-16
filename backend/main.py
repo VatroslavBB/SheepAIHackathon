@@ -51,7 +51,7 @@ manager = ConnectionManager()
 schedule_by_line: dict[str, list[str]] = {}
 schedule_updated_at: datetime | None = None
 
-NIM_API_KEY = os.getenv("NIM_API_KEY", "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")
+NIM_API_KEY = os.getenv("NIM_API_KEY", "")
 SIGNALR_BASE = "https://api.promet-split.hr/Fleet/hub/spatial"
 SCHEDULE_PDF_URL = (
     "https://www.promet-split.hr/Portals/0/adam/Documents/"
@@ -524,6 +524,36 @@ UVIJEK govori o LINIJAMA, nikad o ID-u vozila. Korisnik ne zna što je "vozilo #
 - Vozni red: ako su dostupni polasci, navedi ih. Inače uputi na promet-split.hr/vozni-red.
 - Ne izmišljaj podatke. Ako linija nema aktivnih vozila, jasno reci.
 - Nikad ne spominji: ID vozila, broj garaže, sirove koordinate, tehničke detalje API-ja."""
+
+
+@app.post("/api/summarize")
+async def summarize(body: dict):
+    reports       = body.get("reports", [])
+    vehicles_list = body.get("vehicles", [])
+
+    incidents = "\n".join(
+        f"- {r.get('type','?')} kod {r.get('location','?')} ({r.get('severity','?')})"
+        for r in reports
+    )
+    active_lines = ", ".join(sorted({
+        v["line"] for v in vehicles_list if v.get("status") == 1
+    }))
+
+    parts = []
+    if incidents:    parts.append(f"Incidenti:\n{incidents}")
+    if active_lines: parts.append(f"Aktivne autobusne linije: {active_lines}")
+    if not parts:    return {"summary": None}
+
+    res = nim_client.chat.completions.create(
+        model="meta/llama-3.3-70b-instruct",
+        max_tokens=150,
+        messages=[
+            {"role": "system", "content": "Sažmi prometnu situaciju u Splitu u 1-2 rečenice na hrvatskom. Budi konkretan — navedi lokacije problema i koje linije voze. Bez uvoda i filler rečenica."},
+            {"role": "user",   "content": "\n\n".join(parts)},
+        ],
+        temperature=0.3,
+    )
+    return {"summary": res.choices[0].message.content}
 
 
 @app.post("/api/chat")
