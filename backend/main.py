@@ -14,6 +14,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 
+load_dotenv()
+
 app = FastAPI()
 
 app.add_middleware(
@@ -267,8 +269,8 @@ manager = ConnectionManager()
 schedule_by_line: dict[str, list[str]] = {}
 schedule_updated_at: datetime | None = None
 
-NIM_API_KEY = os.getenv("NIM_API_KEY", "")
-SIGNALR_BASE = "https://api.promet-split.hr/Fleet/hub/spatial"
+NIM_API_KEY   = os.getenv("NIM_API_KEY", "missing")
+SIGNALR_BASE  = "https://api.promet-split.hr/Fleet/hub/spatial"
 SCHEDULE_PDF_URL = (
     "https://www.promet-split.hr/Portals/0/adam/Documents/"
     "S9HqnUXeAkyufONCO6U3Ow/Files/Vozni red od 22.04.2026..pdf"
@@ -278,6 +280,9 @@ nim_client = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
     api_key=NIM_API_KEY,
 )
+
+if NIM_API_KEY == "missing":
+    print("[warn] NIM_API_KEY nije postavljen — AI funkcije neće raditi")
 
 
 # ── Bearing ────────────────────────────────────────────────────────────────────
@@ -764,6 +769,38 @@ Koristi smjer + poziciju za procjenu dolazi li bus prema korisniku ili se udalja
 - Jednokratna karta: 1.30 EUR (plaća se vozaču gotovinom)
 - Kartica: 0.66 EUR | Dnevna karta: 4.00 EUR
 
+### 🚂 Hrvatske željeznice (HŽ) — vlakovi
+- Kolodvor Split: Obala Kneza Domagoja, uz trajektnu luku (43.5050, 16.4393)
+- Info: 060 333 444 | prodaja.hzpp.hr
+- Pruga: Split – Solin – Klis Kosa – Perković – Knin – Gospić – Ogulin – Zagreb Gl.
+- Trajanje Split → Zagreb: ~5h45min – 6h (IC), ~8h (noćni vlak EN)
+- Cijena Split → Zagreb: ~14–17 EUR (2. razred, IC) | Split → Knin: ~7–8 EUR
+
+Polasci iz Splita (okvirni IC raspored):
+  IC 500: Split 06:07 → Knin 08:12 → Zagreb ~12:20
+  IC 502: Split 11:07 → Knin 13:12 → Zagreb ~17:20
+  IC 504: Split 15:33 → Knin 17:38 → Zagreb ~21:45
+  EN 499: Split 21:28 → Knin 23:28 → Zagreb ~06:10 (noćni)
+
+Polasci iz Zagreba prema Splitu:
+  IC 501: Zagreb 06:10 → Knin ~11:30 → Split 14:03
+  IC 503: Zagreb 10:10 → Knin ~15:30 → Split 18:03
+  IC 505: Zagreb 14:10 → Knin ~19:30 → Split 22:03
+
+Ključne stanice pruge kroz Dalmaciju:
+  Split (43.5050, 16.4393) → Solin (43.5395, 16.4760) → Klis Kosa →
+  Perković (43.7370, 16.1850) → Knin (44.0422, 16.1980) → (nastavlja prema Zagrebu)
+
+Regionalni vlakovi:
+  - Split – Perković (za Šibenik): nekoliko polazaka dnevno, ~1h vožnje
+  - Šibenik nije direktno na glavnoj pruzi — putnici prelaze u Perkoviću
+
+Kad korisnik pita za vlak:
+- Navedi pravi raspored polazaka iz Splita
+- Preporuči online kupnju na prodaja.hzpp.hr ili info 060 333 444
+- Napomeni da su rezervacije obavezne za IC vlakove
+- Nabroji i vlak uz autobus, Nextbike, Uber i taxi kao opciju za dulja putovanja
+
 ### 🚲 Nextbike (dijeljenje bicikala)
 - Real-time podaci o stanicama dostupni su u kontekstu
 - Tarife: 30 min = 1.00 EUR | 60 min = 2.00 EUR | Dnevna = 5.00 EUR | Godišnja = 35 EUR
@@ -854,6 +891,95 @@ Aktivni incidenti dostupni su u kontekstu. UVIJEK ih uzmi u obzir pri preporuci 
 4. Uvijek zaključi s **preporukom najboljeg prijevoza** uz obrazloženje uzimajući u obzir incidente."""
 
 
+# ── Train schedule ────────────────────────────────────────────────────────────
+
+TRAIN_SCHEDULE = [
+    # (train_id, display, direction, dep_split_hhmm, arr_knin_hhmm, arr_zagreb_hhmm)
+    ("IC500",  "IC 500", "Split→Zagreb", "06:07", "08:12", "12:20"),
+    ("IC502",  "IC 502", "Split→Zagreb", "11:07", "13:12", "17:20"),
+    ("IC504",  "IC 504", "Split→Zagreb", "15:33", "17:38", "21:45"),
+    ("EN499",  "EN 499", "Split→Zagreb (noćni)", "21:28", "23:28", "06:10+1"),
+    ("IC501",  "IC 501", "Zagreb→Split", "06:10", "11:30", "14:03"),
+    ("IC503",  "IC 503", "Zagreb→Split", "10:10", "15:30", "18:03"),
+    ("IC505",  "IC 505", "Zagreb→Split", "14:10", "19:30", "22:03"),
+]
+
+
+def _hhmm_to_minutes(t: str) -> int:
+    t = t.replace("+1", "")
+    h, m = t.split(":")
+    return int(h) * 60 + int(m)
+
+
+def build_train_context() -> str:
+    now = datetime.now()
+    now_min = now.hour * 60 + now.minute
+    lines = [f"Vlakovi HŽ — trenutno stanje ({now.strftime('%H:%M')}):"]
+
+    for tid, name, direction, dep, knin, zgb in TRAIN_SCHEDULE:
+        dep_min  = _hhmm_to_minutes(dep)
+        end_t    = zgb.replace("+1", "")
+        end_min  = _hhmm_to_minutes(end_t) + (1440 if "+1" in zgb else 0)
+        journey  = (end_min - dep_min) % 1440
+
+        elapsed = (now_min - dep_min) % 1440
+        if elapsed <= journey:
+            pct = elapsed / journey if journey else 0
+            status = f"u vožnji ({int(pct*100)}% puta)"
+        else:
+            status = "nije aktivan / čeka idući polazak"
+
+        lines.append(f"  {name} ({direction}): polazak {dep} | {status}")
+
+    return "\n".join(lines)
+
+
+@app.get("/api/trains")
+def get_trains():
+    now = datetime.now()
+    now_min = now.hour * 60 + now.minute
+    result = []
+    for tid, name, direction, dep, knin, zgb in TRAIN_SCHEDULE:
+        dep_min = _hhmm_to_minutes(dep)
+        end_t   = zgb.replace("+1", "")
+        end_min = _hhmm_to_minutes(end_t) + (1440 if "+1" in zgb else 0)
+        journey = (end_min - dep_min) % 1440
+        elapsed = (now_min - dep_min) % 1440
+        active  = elapsed <= journey
+        pct     = (elapsed / journey) if (active and journey) else None
+        result.append({
+            "id": tid, "name": name, "direction": direction,
+            "departure": dep, "knin": knin, "zagreb": zgb,
+            "active": active, "progress": round(pct, 3) if pct is not None else None,
+        })
+    return result
+
+
+OVERPASS_MIRRORS = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
+]
+
+@app.post("/api/overpass")
+async def overpass_proxy(body: dict):
+    query = body.get("query", "")
+    for mirror in OVERPASS_MIRRORS:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(
+                    mirror,
+                    data={"data": query},
+                    headers={"User-Agent": "SplitPrometAgent/1.0"},
+                )
+                r.raise_for_status()
+                return r.json()
+        except Exception as e:
+            print(f"[overpass] {mirror} failed: {e}")
+    return {"elements": []}
+
+
 @app.post("/api/summarize")
 async def summarize(body: dict):
     reports       = body.get("reports", [])
@@ -886,15 +1012,16 @@ async def summarize(body: dict):
 
 @app.post("/api/chat")
 async def chat(body: dict):
-    user_message    = body.get("message", "")
-    history         = body.get("history", [])
-    user_location   = body.get("user_location")   # {lat, lng} | None
-    pins            = body.get("pins", [])         # [{lat, lng, label}, ...]
-    reports         = body.get("reports", [])      # [{type, location, severity, summary, lat, lng}, ...]
+    user_message  = body.get("message", "")
+    history       = body.get("history", [])
+    user_location = body.get("user_location")  # {lat, lng} | None
+    pins          = body.get("pins", [])        # [{lat, lng, label}, ...]
+    reports       = body.get("reports", [])     # [{type, location, severity, summary, lat, lng}, ...]
 
     vehicle_ctx = build_vehicle_context()
 
     location_parts: list[str] = []
+
     if user_location:
         location_parts.append(
             f"Korisnikova trenutna GPS lokacija: ({user_location['lat']:.5f}, {user_location['lng']:.5f})"
@@ -903,10 +1030,6 @@ async def chat(body: dict):
         pin_lines = [f"  - \"{p.get('label','Pin')}\": ({p['lat']:.5f}, {p['lng']:.5f})" for p in pins]
         location_parts.append("Korisnikovi pinovi / odredišta:\n" + "\n".join(pin_lines))
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": f"Live podaci o vozilima:\n{vehicle_ctx}"},
-    ]
     if reports:
         lines = [
             f"  - {r.get('type','?')} kod {r.get('location','?')} "
@@ -915,7 +1038,6 @@ async def chat(body: dict):
         ]
         location_parts.append("Aktivni prometni incidenti (prijavljeni od korisnika):\n" + "\n".join(lines))
 
-    # Transport opcije — izračunaj samo ako korisnik ima lokaciju I odredišni pin
     if user_location and pins:
         dest = pins[0]
         transport_ctx = build_transport_context(
@@ -925,19 +1047,26 @@ async def chat(body: dict):
         )
         location_parts.append(f"Procjena prijevoznih opcija:\n{transport_ctx}")
 
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": f"Live podaci o vozilima:\n{vehicle_ctx}"},
+    ]
     if location_parts:
         messages.append({"role": "system", "content": "\n\n".join(location_parts)})
 
     messages += [*history, {"role": "user", "content": user_message}]
 
-    response = nim_client.chat.completions.create(
-        model="meta/llama-3.1-70b-instruct",
-        messages=messages,
-        max_tokens=600,
-        temperature=0.3,
-    )
-
-    return {
-        "response": response.choices[0].message.content,
-        "vehicle_count": len(vehicles),
-    }
+    try:
+        response = nim_client.chat.completions.create(
+            model="meta/llama-3.1-70b-instruct",
+            messages=messages,
+            max_tokens=600,
+            temperature=0.3,
+        )
+        return {
+            "response": response.choices[0].message.content,
+            "vehicle_count": len(vehicles),
+        }
+    except Exception as e:
+        print(f"[chat] NIM greška: {e}")
+        return {"response": f"Greška pri komunikaciji s AI agentom: {e}", "vehicle_count": len(vehicles)}

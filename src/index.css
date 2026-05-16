@@ -10,7 +10,7 @@
   --accent2: #22d3ee;
   --text:    #e2e8f0;
   --muted:   #64748b;
-  --chat-w:  380px;
+  --chat-w:  320px;
 }
 
 body {
@@ -174,4 +174,46 @@ body {
 @keyframes pulse {
   0%,100% { opacity: 1; }
   50%      { opacity: 0.4; }
+}
+
+/* ── View panes ── */
+.view-pane { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+.map-pane  { position: relative; }
+.chat-pane { flex: 0 0 var(--chat-w); }
+
+/* ── Bottom nav (mobile only) ── */
+.bottom-nav { display: none; }
+
+/* Narrow desktop / large tablet — shrink chat panel */
+@media (max-width: 1024px) {
+  :root { --chat-w: 280px; }
+}
+
+@media (max-width: 768px) {
+  :root { --chat-w: 100%; }
+
+  .bottom-nav {
+    display: flex;
+    height: 56px; flex-shrink: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 1100;
+  }
+
+  .bottom-tab {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px;
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); transition: color 0.15s;
+  }
+  .bottom-tab--active { color: var(--accent2); }
+  .bottom-tab__icon   { font-size: 20px; line-height: 1; }
+  .bottom-tab__label  { font-size: 10px; font-family: 'DM Mono', monospace; letter-spacing: 0.05em; }
+
+  .pane-hidden { display: none !important; }
+
+  .chat-pane { flex: 1; }
+
+  /* push map content up so bottom nav doesn't cover hints */
+  .map-pane .leaflet-container { height: 100%; }
 }

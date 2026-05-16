@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from './api'
 
 const QUERY = `[out:json][timeout:25];
 (
@@ -67,6 +68,19 @@ export function useRoadData() {
     async function load() {
       const reports = await fetchOverpass()
       if (!cancelled) setAutoReports(reports)
+    function fetchData() {
+      fetch(`${API_BASE}/api/overpass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: QUERY }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (cancelled) return
+          const reports = (data.elements || []).map(toReport).filter(Boolean)
+          setAutoReports(reports)
+        })
+        .catch(() => {})
     }
 
     load()

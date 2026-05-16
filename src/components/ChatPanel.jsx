@@ -1,18 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { API_BASE } from '../api'
-
-const QUICK_PROMPTS = [
-  { label: 'Linija 7?',  text: 'Gdje je sada linija 7 i u kojem smjeru ide?' },
-  { label: '→ Kampus',   text: 'Koje linije idu prema Kampusu FESB?' },
-  { label: '→ Bačvice',  text: 'Koji autobus me može odvesti na Bačvice?' },
-  { label: 'Statistika', text: 'Koliko autobusa je aktivno i koje linije voze?' },
-]
+import { useLang } from '../LangContext'
 
 export default function ChatPanel({ userLocation, pins, reports }) {
-  const [messages, setMessages] = useState([{
-    role: 'assistant',
-    text: 'Zdravo! Pitaj me o autobusima u Splitu.\n📍 Tapni za svoju lokaciju → predložit ću najbliže linije\n📌 Dodaj pin odredišta → reći ću ti kako doći tamo',
-  }])
+  const { t } = useLang()
+  const c = t.chat
+  const [messages, setMessages] = useState([{ role: 'assistant', text: c.welcome }])
   const [history, setHistory]  = useState([])
   const [input,   setInput]    = useState('')
   const [loading, setLoading]  = useState(false)
@@ -45,7 +38,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
           message:       userText,
           history:       nextHistory.slice(-12),
           user_location: userLocation,
-          pins:          pins.map(p => ({ lat: p.lat, lng: p.lng, label: p.label })),
+          pins:          (pins ?? []).map(p => ({ lat: p.lat, lng: p.lng, label: p.label })),
           reports:       reports.slice(0, 10).map(({ type, location, severity, summary, lat, lng }) =>
                            ({ type, location, severity, summary, lat, lng })),
         }),
@@ -54,14 +47,14 @@ export default function ChatPanel({ userLocation, pins, reports }) {
       setMessages(prev => prev.filter(m => m.key !== key).concat({ role: 'assistant', text: response }))
       setHistory([...nextHistory, { role: 'assistant', content: response }])
     } catch {
-      setMessages(prev => prev.filter(m => m.key !== key).concat({ role: 'assistant', text: 'Greška pri komunikaciji s agentom.' }))
+      setMessages(prev => prev.filter(m => m.key !== key).concat({ role: 'assistant', text: c.error }))
     }
     setLoading(false)
   }, [loading, history, userLocation, pins, reports])
 
   return (
     <div className="chat-panel">
-      <div className="chat-header">AI AGENT // llama-3.1-70b</div>
+      <div className="chat-header">{c.header}</div>
 
       <div className="chat-messages">
         {messages.map((m, i) => (
@@ -71,7 +64,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
       </div>
 
       <div className="quick-prompts">
-        {QUICK_PROMPTS.map(qp => (
+        {c.quickPrompts.map(qp => (
           <button key={qp.label} className="qp" onClick={() => send(qp.text)}>{qp.label}</button>
         ))}
       </div>
@@ -81,7 +74,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && send(input)}
-          placeholder="Pitaj o prometu..."
+          placeholder={c.placeholder}
         />
         <button onClick={() => send(input)} disabled={loading}>↑</button>
       </div>

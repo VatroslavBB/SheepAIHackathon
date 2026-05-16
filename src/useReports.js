@@ -54,12 +54,18 @@ export function useReports() {
   }, [])
 
   const upvoteReport = useCallback(async (id) => {
-    if (!supabase) return
+    if (!supabase || voted.has(id)) return
     const report = reports.find(r => r.id === id)
     if (!report) return
+
+    const next = new Set(voted)
+    next.add(id)
+    setVoted(next)
+    saveVoted(next)
+
     await supabase.from('reports').update({ votes: report.votes + 1 }).eq('id', id)
     setReports(prev => prev.map(r => r.id === id ? { ...r, votes: r.votes + 1 } : r))
   }, [reports, voted])
 
-  return { reports, addReport, upvoteReport }
+  return { reports, addReport, upvoteReport, votedIds: voted }
 }
