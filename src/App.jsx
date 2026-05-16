@@ -2,13 +2,10 @@ import { useState, useCallback } from 'react'
 import MapView       from './components/MapView'
 import ChatPanel     from './components/ChatPanel'
 import ReportModal   from './components/ReportModal'
-import VoiceButton   from './components/VoiceButton'
 import SummaryPanel  from './components/SummaryPanel'
 import PinLabelModal from './components/PinLabelModal'
-import { useVehicles }           from './useVehicles'
-import { useReports }            from './useReports'
-import { useVoice }              from './useVoice'
-import { parseIncidentFromText } from './llm'
+import { useVehicles } from './useVehicles'
+import { useReports }  from './useReports'
 
 export default function App() {
   const { vehicles, online } = useVehicles()
@@ -24,17 +21,6 @@ export default function App() {
   const [pendingReport, setPendingReport] = useState(null)
   const [prefilled,     setPrefilled]     = useState(null)
   const [modalLoading,  setModalLoading]  = useState(false)
-
-  // Voice → parse incident
-  const handleVoiceResult = useCallback(async (text) => {
-    setPendingReport({ lat: 43.5081, lng: 16.4402 })
-    setModalLoading(true)
-    try   { setPrefilled(await parseIncidentFromText(text)) }
-    catch { setPrefilled(null) }
-    finally { setModalLoading(false) }
-  }, [])
-
-  const { listening, start: startVoice, stop: stopVoice } = useVoice({ onResult: handleVoiceResult })
 
   // Map click: pin mode → pin, else → incident report
   const handleMapClick = useCallback((latlng) => {
@@ -147,17 +133,14 @@ export default function App() {
           {/* AI traffic summary */}
           <SummaryPanel reports={reports} vehicles={vehicles} />
 
-          {/* Voice button */}
-          <VoiceButton listening={listening} onClick={listening ? stopVoice : startVoice} />
-
           {/* Intro hint */}
           {!reports.length && !pinMode && (
             <div style={{
-              position: 'absolute', bottom: 100, left: '50%', transform: 'translateX(-50%)',
+              position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(0,0,0,0.65)', color: '#e2e8f0', borderRadius: 20,
               padding: '7px 18px', fontSize: 12, zIndex: 800, whiteSpace: 'nowrap', pointerEvents: 'none',
             }}>
-              Klikni na kartu za prijavu incidenta · 🎙️ glasovna prijava
+              Klikni na kartu za prijavu incidenta
             </div>
           )}
         </div>
