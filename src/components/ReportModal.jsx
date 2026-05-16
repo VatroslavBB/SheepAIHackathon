@@ -12,15 +12,14 @@ const SEVERITIES = [
   { value: 'high',   label: 'Visoka' },
 ]
 
-export default function ReportModal({ latlng, prefilled, onConfirm, onCancel, loading }) {
-  const [type, setType] = useState(prefilled?.type || 'jam')
-  const [severity, setSeverity] = useState(prefilled?.severity || 'medium')
-  const [location, setLocation] = useState(prefilled?.location || '')
-  const [summary, setSummary] = useState(prefilled?.summary || '')
+export default function ReportModal({ latlng, onConfirm, onCancel, loading }) {
+  const [type, setType] = useState('jam')
+  const [severity, setSeverity] = useState('medium')
+  const [location, setLocation] = useState('')
 
   function handleSubmit(e) {
     e.preventDefault()
-    onConfirm({ lat: latlng.lat, lng: latlng.lng, type, severity, location, summary })
+    onConfirm({ lat: latlng.lat, lng: latlng.lng, type, severity, location, summary: '' })
   }
 
   return (
@@ -87,16 +86,6 @@ export default function ReportModal({ latlng, prefilled, onConfirm, onCancel, lo
               </button>
             ))}
           </div>
-
-          {summary ? (
-            <div style={{
-              background: '#f0fdf4', border: '1px solid #bbf7d0',
-              borderRadius: 8, padding: '10px 12px', fontSize: 13,
-              color: '#166534', marginBottom: 16,
-            }}>
-              {summary}
-            </div>
-          ) : null}
 
           <div style={{ display: 'flex', gap: 8 }}>
             <button
