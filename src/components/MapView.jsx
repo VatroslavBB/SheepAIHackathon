@@ -33,11 +33,13 @@ function makeBusIcon(v) {
   })
 }
 
-function makeIncidentIcon(type) {
+function makeIncidentIcon(type, auto) {
   const { emoji, color } = INCIDENT_META[type] || INCIDENT_META.jam
   return L.divIcon({
     className: '',
-    html: `<div class="incident-marker" style="background:${color}">${emoji}</div>`,
+    html: auto
+      ? `<div class="incident-marker" style="background:#b45309;border-color:#fde68a">🔧</div>`
+      : `<div class="incident-marker" style="background:${color}">${emoji}</div>`,
     iconSize: [36, 36], iconAnchor: [18, 18],
   })
 }
@@ -82,20 +84,26 @@ function BusMarker({ vehicle: v }) {
 
 function IncidentMarker({ report: r, onUpvote }) {
   const meta = INCIDENT_META[r.type] || INCIDENT_META.jam
-  const icon = useMemo(() => makeIncidentIcon(r.type), [r.type])
+  const icon = useMemo(() => makeIncidentIcon(r.type, r.auto), [r.type, r.auto])
   return (
     <Marker position={[r.lat, r.lng]} icon={icon} opacity={r.severity === 'low' ? 0.65 : 1}>
       <Popup>
-        <div className="popup-line">{meta.emoji} {meta.label}</div>
+        <div className="popup-line">
+          {r.auto ? '🔧 Radovi' : `${meta.emoji} ${meta.label}`}
+          {r.auto && <span style={{ marginLeft: 6, fontSize: 10, background: '#92400e', color: '#fde68a', borderRadius: 3, padding: '1px 4px' }}>OSM</span>}
+        </div>
         <div className="popup-detail">
           {r.location && <>{r.location}<br /></>}
           {r.summary  && <span style={{ color: '#e2e8f0', display: 'block', marginBottom: 4 }}>{r.summary}</span>}
-          Ozbiljnost: {SEV_LABEL[r.severity] || r.severity} · {r.votes} potvrda
-          <br />
-          <button
-            onClick={() => onUpvote(r.id)}
-            style={{ marginTop: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}
-          >+ Potvrdi</button>
+          Ozbiljnost: {SEV_LABEL[r.severity] || r.severity}
+          {!r.auto && <> · {r.votes} potvrda</>}
+          {!r.auto && (
+            <><br />
+            <button
+              onClick={() => onUpvote(r.id)}
+              style={{ marginTop: 8, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}
+            >+ Potvrdi</button></>
+          )}
         </div>
       </Popup>
     </Marker>

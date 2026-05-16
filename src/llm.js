@@ -8,24 +8,6 @@ const client = new OpenAI({
 
 const MODEL = 'meta/llama-3.3-70b-instruct'
 
-export async function parseIncidentFromText(text) {
-  const res = await client.chat.completions.create({
-    model: MODEL,
-    max_tokens: 256,
-    messages: [
-      {
-        role: 'system',
-        content: `Ti si parser prometnih incidenata za Split, Hrvatska.
-Izvuci informacije iz korisničke prijave (na hrvatskom ili engleskom).
-Odgovori SAMO validnim JSON-om, bez markdowna, bez objašnjenja.
-Schema: { "type": "jam|accident|closed", "location": "naziv ulice ili kvarta", "severity": "low|medium|high", "summary": "jedna rečenica na hrvatskom" }
-Ako lokacija nije jasna, koristi "Nepoznata lokacija".`,
-      },
-      { role: 'user', content: text },
-    ],
-  })
-  return JSON.parse(res.choices[0].message.content)
-}
 
 export async function summarizeTraffic(reports, vehicles = []) {
   const incidents = reports
@@ -44,7 +26,6 @@ export async function summarizeTraffic(reports, vehicles = []) {
   const res = await client.chat.completions.create({
     model: MODEL,
     max_tokens: 150,
-    stream: true,
     messages: [
       {
         role: 'system',
