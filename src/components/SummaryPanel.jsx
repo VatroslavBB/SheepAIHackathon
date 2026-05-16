@@ -3,18 +3,18 @@ import { summarizeTraffic } from '../llm'
 import { useLang } from '../LangContext'
 
 export default function SummaryPanel({ reports, vehicles }) {
-  const { t } = useLang()
+  const { lang, t } = useLang()
   const [summary, setSummary] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!reports.length) { setSummary(''); return }
     setLoading(true)
-    summarizeTraffic(reports, vehicles)
+    summarizeTraffic(reports, vehicles, lang)
       .then(s  => setSummary(s || ''))
       .catch(() => setSummary(''))
       .finally(() => setLoading(false))
-  }, [reports.length])
+  }, [reports.length, lang])
 
   if (!reports.length) return null
 

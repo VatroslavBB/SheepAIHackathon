@@ -12,19 +12,11 @@ import { validateLocation } from './validateLocation'
 import { useLang }          from './LangContext'
 
 export default function App() {
-  const { vehicles, online }                 = useVehicles()
-  const { reports, addReport, upvoteReport } = useReports()
-  const { stations: bikes }                  = useBikes()
-  const autoReports                          = useRoadData()
-  const allReports = useMemo(
-    () => [...reports, ...autoReports],
-    [reports, autoReports]
-  )
-  const { lang, setLang, t } = useLang()
-  const { vehicles, online } = useVehicles()
+  const { lang, setLang, t }                        = useLang()
+  const { vehicles, online }                         = useVehicles()
   const { reports, addReport, upvoteReport, votedIds } = useReports()
-  const { stations: bikes } = useBikes()
-  const autoReports = useRoadData()
+  const { stations: bikes }                          = useBikes()
+  const autoReports                                  = useRoadData()
   const allReports = useMemo(() => [...reports, ...autoReports], [reports, autoReports])
 
   const [pins,          setPins]          = useState([])
@@ -44,17 +36,14 @@ export default function App() {
       setPinMode(false)
       return
     }
-
     setValidating(true)
     const result = await validateLocation(latlng.lat, latlng.lng, t)
     setValidating(false)
-
     if (!result.valid) {
       setLocationError(result.reason)
       setTimeout(() => setLocationError(null), 3500)
       return
     }
-
     setPendingReport(latlng)
   }, [pinMode, t])
 
@@ -145,9 +134,6 @@ export default function App() {
             }}>{t.hints.validating}</div>
           )}
 
-          <SummaryPanel reports={allReports} vehicles={vehicles} />
-
-          {!allReports.length && !pinMode && (
           {locationError && (
             <div style={{
               position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',

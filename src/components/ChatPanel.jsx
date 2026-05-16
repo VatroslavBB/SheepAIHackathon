@@ -3,13 +3,21 @@ import { API_BASE } from '../api'
 import { useLang } from '../LangContext'
 
 export default function ChatPanel({ userLocation, pins, reports }) {
-  const { t } = useLang()
+  const { lang, t } = useLang()
   const c = t.chat
+
   const [messages, setMessages] = useState([{ role: 'assistant', text: c.welcome }])
-  const [history, setHistory]  = useState([])
-  const [input,   setInput]    = useState('')
-  const [loading, setLoading]  = useState(false)
-  const bottomRef              = useRef(null)
+  const [history,  setHistory]  = useState([])
+  const [input,    setInput]    = useState('')
+  const [loading,  setLoading]  = useState(false)
+  const bottomRef               = useRef(null)
+
+  // Reset chat when language switches
+  useEffect(() => {
+    setMessages([{ role: 'assistant', text: c.welcome }])
+    setHistory([])
+    setInput('')
+  }, [lang])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -37,6 +45,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
         body: JSON.stringify({
           message:       userText,
           history:       nextHistory.slice(-12),
+          lang,
           user_location: userLocation,
           pins:          (pins ?? []).map(p => ({ lat: p.lat, lng: p.lng, label: p.label })),
           reports:       reports.slice(0, 10).map(({ type, location, severity, summary, lat, lng }) =>
@@ -50,7 +59,7 @@ export default function ChatPanel({ userLocation, pins, reports }) {
       setMessages(prev => prev.filter(m => m.key !== key).concat({ role: 'assistant', text: c.error }))
     }
     setLoading(false)
-  }, [loading, history, userLocation, pins, reports])
+  }, [loading, history, lang, userLocation, pins, reports])
 
   return (
     <div className="chat-panel">

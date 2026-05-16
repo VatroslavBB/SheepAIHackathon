@@ -8,8 +8,6 @@ import tempfile
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-
-load_dotenv()  # učita backend/.env automatski
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -984,6 +982,7 @@ async def overpass_proxy(body: dict):
 async def summarize(body: dict):
     reports       = body.get("reports", [])
     vehicles_list = body.get("vehicles", [])
+    lang          = body.get("lang", "hr")
 
     incidents = "\n".join(
         f"- {r.get('type','?')} kod {r.get('location','?')} ({r.get('severity','?')})"
@@ -998,11 +997,16 @@ async def summarize(body: dict):
     if active_lines: parts.append(f"Aktivne autobusne linije: {active_lines}")
     if not parts:    return {"summary": None}
 
+    if lang == "en":
+        system_msg = "Summarize the traffic situation in Split, Croatia in 1-2 sentences in English. Be specific — mention locations and which bus lines are running. No filler."
+    else:
+        system_msg = "Sažmi prometnu situaciju u Splitu u 1-2 rečenice na hrvatskom. Budi konkretan — navedi lokacije problema i koje linije voze. Bez uvoda i filler rečenica."
+
     res = nim_client.chat.completions.create(
         model="meta/llama-3.3-70b-instruct",
         max_tokens=150,
         messages=[
-            {"role": "system", "content": "Sažmi prometnu situaciju u Splitu u 1-2 rečenice na hrvatskom. Budi konkretan — navedi lokacije problema i koje linije voze. Bez uvoda i filler rečenica."},
+            {"role": "system", "content": system_msg},
             {"role": "user",   "content": "\n\n".join(parts)},
         ],
         temperature=0.3,
@@ -1014,6 +1018,7 @@ async def summarize(body: dict):
 async def chat(body: dict):
     user_message  = body.get("message", "")
     history       = body.get("history", [])
+    lang          = body.get("lang", "hr")
     user_location = body.get("user_location")  # {lat, lng} | None
     pins          = body.get("pins", [])        # [{lat, lng, label}, ...]
     reports       = body.get("reports", [])     # [{type, location, severity, summary, lat, lng}, ...]
@@ -1047,8 +1052,14 @@ async def chat(body: dict):
         )
         location_parts.append(f"Procjena prijevoznih opcija:\n{transport_ctx}")
 
+    lang_instruction = (
+        "Respond exclusively in English. Translate all place names, street names, and status labels into English."
+        if lang == "en" else
+        "Odgovaraj isključivo na hrvatskom jeziku."
+    )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": lang_instruction},
         {"role": "system", "content": f"Live podaci o vozilima:\n{vehicle_ctx}"},
     ]
     if location_parts:
